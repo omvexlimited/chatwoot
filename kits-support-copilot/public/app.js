@@ -136,7 +136,7 @@ function hydrateFromContext() {
   }
 
   els.conversationLabel.textContent = conversationId
-    ? `Conversation ${conversationId} | ${contact.email || contact.name || 'unknown contact'}`
+    ? `#${conversationId} | ${contact.email || contact.name || 'unknown contact'}`
     : 'No Chatwoot conversation context.';
 
   renderChat();
