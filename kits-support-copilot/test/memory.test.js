@@ -17,6 +17,10 @@ test('parses copilot memory commands', () => {
   });
   assert.deepEqual(parseCopilotCommand('/memories'), { name: 'memories', argument: '' });
   assert.deepEqual(parseCopilotCommand('/forget 12'), { name: 'forget', argument: '12' });
+  assert.deepEqual(parseCopilotCommand('/newticket supplier says no stock'), {
+    name: 'newticket',
+    argument: 'supplier says no stock'
+  });
   assert.deepEqual(parseCopilotCommand('/help'), { name: 'help', argument: '' });
   assert.equal(parseCopilotCommand('normal message'), null);
 });

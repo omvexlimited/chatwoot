@@ -18,6 +18,7 @@ const state = {
   contextResult: null,
   chatMessages: [],
   lastResult: null,
+  pendingIssue: null,
   selectedOrderRef: '',
   splitResize: null,
   token: new URLSearchParams(window.location.search).get('token') || '',
@@ -120,6 +121,7 @@ function hydrateFromContext() {
     session = sessionBelongsToContact(session, contact) ? session : clearStoredSession();
     state.chatMessages = session.chatMessages;
     state.lastResult = session.lastResult;
+    state.pendingIssue = session.pendingIssue;
     state.selectedOrderRef = session.selectedOrderRef;
     els.draft.value = session.draft;
     els.confidence.textContent = `confidence: ${session.lastResult?.confidence || 'n/a'}`;
@@ -156,6 +158,7 @@ function clearStoredSession() {
     chatMessages: [],
     draft: '',
     lastResult: null,
+    pendingIssue: null,
     selectedOrderRef: '',
     updatedAt: null
   };
@@ -209,11 +212,13 @@ async function sendAgentMessage(rawMessage) {
     const result = await api('/api/copilot-chat', {
       ...buildBasePayload(),
       chat_messages: state.chatMessages,
-      current_draft: els.draft.value
+      current_draft: els.draft.value,
+      pending_issue: state.pendingIssue
     });
     if (!isCurrentContext({ contextKey, requestId, type: 'chat' })) return;
 
     state.lastResult = result;
+    state.pendingIssue = result.pending_issue || null;
     state.contextResult = {
       ...(state.contextResult || {}),
       contact_email: result.contact_email || state.contextResult?.contact_email,
@@ -641,6 +646,7 @@ async function savePrivateNote() {
 function resetChat() {
   state.chatMessages = [];
   state.lastResult = null;
+  state.pendingIssue = null;
   els.draft.value = '';
   els.confidence.textContent = 'confidence: n/a';
   hideInsertNotice();
@@ -669,6 +675,7 @@ function persistSession() {
     chatMessages: state.chatMessages,
     draft: els.draft.value,
     lastResult: state.lastResult,
+    pendingIssue: state.pendingIssue,
     selectedOrderRef: state.selectedOrderRef,
     updatedAt: new Date().toISOString()
   });
@@ -876,6 +883,7 @@ function selectOrderCandidate(orderRef) {
   state.selectedOrderRef = normalizedOrderRef;
   state.chatMessages = [];
   state.lastResult = null;
+  state.pendingIssue = null;
   state.chatRequestId += 1;
   els.draft.value = '';
   els.confidence.textContent = 'confidence: n/a';

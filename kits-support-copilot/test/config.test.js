@@ -18,6 +18,7 @@ test('supports Shopify Dev Dashboard client credentials aliases', () => {
     shopify_auth_mode: 'client_credentials',
     delivery_analytics: false,
     provider_lookup: false,
+    kits_internal_api: false,
     memory: false,
     chatwoot: false,
     api_token_required: false
@@ -99,8 +100,11 @@ test('falls back to DATABASE_URL for copilot memory', () => {
 
 test('supports Kits admin base URL override', () => {
   const config = loadConfig({
-    KITS_ADMIN_BASE_URL: 'https://admin.example.test/'
+    KITS_ADMIN_BASE_URL: 'https://admin.example.test/',
+    KITS_INTERNAL_API_TOKEN: 'secret'
   });
 
   assert.equal(config.kitsAdminBaseUrl, 'https://admin.example.test');
+  assert.equal(config.kitsInternalApiToken, 'secret');
+  assert.equal(getConfigStatus(config).kits_internal_api, true);
 });

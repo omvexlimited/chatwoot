@@ -32,6 +32,7 @@ export function loadConfig(env = process.env) {
     krProviderDatabaseUrl: envValue(env, ['KR_PROVIDER_DATABASE_URL', 'KITS_REPUBLIC_DATABASE_URL']),
     krProviderStoreId: envValue(env, ['KR_PROVIDER_STORE_ID'], 'kits_republic'),
     krProviderDatabaseSsl: envValue(env, ['KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
+    kitsInternalApiToken: envValue(env, ['KITS_INTERNAL_API_TOKEN']),
     chatwootBaseUrl,
     chatwootAccountId: envValue(env, ['CHATWOOT_ACCOUNT_ID']),
     chatwootApiToken: envValue(env, ['CHATWOOT_API_TOKEN'])
@@ -45,6 +46,7 @@ export function getConfigStatus(config) {
     shopify_auth_mode: shopifyAuthMode(config),
     delivery_analytics: Boolean(config.krAnalyticsDatabaseUrl),
     provider_lookup: Boolean(config.krProviderDatabaseUrl),
+    kits_internal_api: Boolean(config.kitsAdminBaseUrl && config.kitsInternalApiToken),
     memory: Boolean(config.copilotDatabaseUrl),
     chatwoot: Boolean(config.chatwootBaseUrl && config.chatwootApiToken),
     api_token_required: Boolean(config.copilotApiToken)

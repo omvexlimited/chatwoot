@@ -30,6 +30,7 @@ export function normalizeSession(session = {}) {
     draft: String(session.draft || ''),
     lastResult: session.lastResult && typeof session.lastResult === 'object' ? session.lastResult : null,
     selectedOrderRef: normalizeOrderRef(session.selectedOrderRef),
+    pendingIssue: normalizePendingIssue(session.pendingIssue),
     updatedAt: session.updatedAt || new Date().toISOString()
   };
 }
@@ -40,6 +41,7 @@ function emptySession() {
     draft: '',
     lastResult: null,
     selectedOrderRef: '',
+    pendingIssue: null,
     updatedAt: null
   };
 }
@@ -58,4 +60,21 @@ function normalizeMessages(messages) {
     }))
     .filter(message => message.content)
     .slice(-40);
+}
+
+function normalizePendingIssue(value) {
+  if (!value || typeof value !== 'object') return null;
+  const orderRef = normalizeOrderRef(value.order_ref);
+  const providerId = Number(value.provider_id);
+  const message = String(value.message || '').trim();
+  if (!orderRef || !Number.isInteger(providerId) || providerId <= 0 || !message) return null;
+  return {
+    order_ref: orderRef,
+    provider_id: providerId,
+    provider_label: String(value.provider_label || '').trim(),
+    issue_type: String(value.issue_type || 'other').trim(),
+    message,
+    admin_order_url: String(value.admin_order_url || '').trim(),
+    updated_at: value.updated_at || new Date().toISOString()
+  };
 }

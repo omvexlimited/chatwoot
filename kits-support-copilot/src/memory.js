@@ -10,6 +10,15 @@ const HELP_TEXT = [
   '/forget <id>',
   'Disable a saved memory by ID. Example: /forget 12',
   '',
+  '/newticket <text>',
+  'Prepare a Kits Republic order issue draft. Example: /newticket supplier says size XL is missing.',
+  '',
+  '/newticket approve',
+  'Create the currently proposed order issue.',
+  '',
+  '/newticket cancel',
+  'Discard the current order issue proposal.',
+  '',
   '/help',
   'Show this command list.'
 ].join('\n');
@@ -57,6 +66,9 @@ export function parseCopilotCommand(value = '') {
   }
   if (command === '/forget') {
     return { name: 'forget', argument };
+  }
+  if (command === '/newticket') {
+    return { name: 'newticket', argument };
   }
   if (command === '/help') {
     return { name: 'help', argument };

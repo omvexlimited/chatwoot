@@ -21,6 +21,11 @@ import {
   runMemoryCommand
 } from './memory.js';
 import {
+  normalizePendingIssue,
+  runNewTicketCommand,
+  runPendingTicketFeedback
+} from './new-ticket.js';
+import {
   buildCopilotChatPrompt,
   buildFallbackDraft,
   buildPrompt,
@@ -150,6 +155,35 @@ async function handleCopilotChat(req, res) {
   const agentConfirmedFacts = extractAgentConfirmedFacts(chatMessages);
   const currentDraft = String(body.current_draft || '').trim();
   const command = latestUserCommand(chatMessages);
+  const pendingIssue = normalizePendingIssue(body.pending_issue);
+  const latestUserMessage = latestUserChatMessage(chatMessages);
+  const ticketResult = await runNewTicketCommand({
+    command,
+    config,
+    context: responseContext,
+    pendingIssue
+  }) || (!command && pendingIssue ? runPendingTicketFeedback({
+    message: latestUserMessage,
+    pendingIssue
+  }) : null);
+
+  if (ticketResult?.handled) {
+    return sendCopilotChatResponse(res, {
+      context,
+      responseContext,
+      assistantMessage: ticketResult.assistant_message,
+      draft: currentDraft,
+      reasoningSummary: ticketResult.reasoning_summary,
+      confidence: ticketResult.confidence,
+      warnings: ticketResult.warnings,
+      agentConfirmedFacts,
+      preserveDraft: ticketResult.preserve_draft,
+      skipInsert: ticketResult.skip_insert,
+      approvedMemories: [],
+      pendingIssue: ticketResult.pending_issue ?? null
+    });
+  }
+
   const commandResult = await runMemoryCommand({
     command,
     config,
@@ -178,7 +212,8 @@ async function handleCopilotChat(req, res) {
       agentConfirmedFacts,
       preserveDraft: commandResult.preserve_draft,
       skipInsert: commandResult.skip_insert,
-      approvedMemories: []
+      approvedMemories: [],
+      pendingIssue
     });
   }
 
@@ -279,7 +314,8 @@ function sendCopilotChatResponse(res, {
   agentConfirmedFacts = [],
   approvedMemories = [],
   preserveDraft = false,
-  skipInsert = false
+  skipInsert = false,
+  pendingIssue = null
 }) {
   return sendJson(res, 200, {
     assistant_message: assistantMessage,
@@ -296,7 +332,8 @@ function sendCopilotChatResponse(res, {
     confidence,
     warnings: uniqueStrings(warnings),
     preserve_draft: preserveDraft,
-    skip_insert: skipInsert
+    skip_insert: skipInsert,
+    pending_issue: pendingIssue
   });
 }
 
@@ -567,6 +604,10 @@ function normalizeChatMessages(messages) {
     }))
     .filter(message => message.content)
     .slice(-24);
+}
+
+function latestUserChatMessage(messages = []) {
+  return [...messages].reverse().find(message => message?.role !== 'assistant')?.content || '';
 }
 
 function buildFallbackAssistantMessage({ context, currentDraft, agentConfirmedFacts = [] }) {

@@ -28,10 +28,18 @@ test('persists normalized chat session data', () => {
     ],
     draft: 'Draft text',
     lastResult: { confidence: 'medium' },
-    selectedOrderRef: '2222'
+    selectedOrderRef: '2222',
+    pendingIssue: {
+      order_ref: '2222',
+      provider_id: '4',
+      provider_label: 'Mign Jin (1)',
+      issue_type: 'stock',
+      message: 'Stock issue for order #2222: no stock'
+    }
   });
 
-  assert.deepEqual(loadSession(storage, key), {
+  const loaded = loadSession(storage, key);
+  assert.deepEqual(loaded, {
     chatMessages: [
       { role: 'user', content: 'hazlo mas corto' },
       { role: 'user', content: 'kept as user' },
@@ -40,12 +48,22 @@ test('persists normalized chat session data', () => {
     draft: 'Draft text',
     lastResult: { confidence: 'medium' },
     selectedOrderRef: '#2222',
-    updatedAt: loadSession(storage, key).updatedAt
+    pendingIssue: {
+      order_ref: '#2222',
+      provider_id: 4,
+      provider_label: 'Mign Jin (1)',
+      issue_type: 'stock',
+      message: 'Stock issue for order #2222: no stock',
+      admin_order_url: '',
+      updated_at: loaded.pendingIssue.updated_at
+    },
+    updatedAt: loaded.updatedAt
   });
 
   clearSession(storage, key);
   assert.equal(loadSession(storage, key).draft, '');
   assert.equal(loadSession(storage, key).selectedOrderRef, '');
+  assert.equal(loadSession(storage, key).pendingIssue, null);
 });
 
 class MemoryStorage {
