@@ -58,7 +58,7 @@ export async function prepareNewTicketProposalFromContext({ config, context, hin
   });
   if (!proposal) return fallback;
 
-  return ticketResponse(formatProposal(proposal), {
+  return ticketResponse(formatProposal(proposal, context), {
     pendingIssue: proposal,
     confidence: result.confidence,
     warnings: result.warnings
@@ -70,7 +70,7 @@ export async function revisePendingTicketProposalFromFeedback({ config, context,
   if (!current) return null;
 
   const fallbackProposal = reviseIssueProposal({ proposal: current, feedback });
-  const fallback = ticketResponse(formatProposal(fallbackProposal), {
+  const fallback = ticketResponse(formatProposal(fallbackProposal, context), {
     pendingIssue: fallbackProposal,
     confidence: 'medium'
   });
@@ -91,7 +91,7 @@ export async function revisePendingTicketProposalFromFeedback({ config, context,
   });
   if (!updated) return fallback;
 
-  return ticketResponse(formatProposal(updated), {
+  return ticketResponse(formatProposal(updated, context), {
     pendingIssue: updated,
     confidence: result.confidence,
     warnings: result.warnings
@@ -146,7 +146,7 @@ function fallbackProposalResult({ config, context, hint = '' }) {
   }
 
   const proposal = buildIssueProposal({ config, context, details: trimmedHint });
-  return ticketResponse(formatProposal(proposal), {
+  return ticketResponse(formatProposal(proposal, context), {
     pendingIssue: proposal,
     confidence: 'medium',
     warnings: config?.openaiApiKey ? [] : ['OpenAI is not configured, so the agent hint was used as the issue source.']
@@ -305,6 +305,7 @@ function buildIssueProposalPrompt({ context, hint = '' }) {
       'You create internal Kits Republic order issue proposals for the supplier/admin team.',
       'Use the selected order, provider, customer email, latest email, conversation, tracking, line items, and optional agent hint.',
       'Do not ask the agent to write the issue details if the context is clear.',
+      'If an existing open ticket appears to cover the same issue, warn about it and only propose a new issue if the context clearly needs a separate ticket.',
       'If the issue is not clear from the context and agent hint, return action "clarification" with one short question.',
       'The issue message is internal only, written in English, concise, operational, and suitable for a supplier/admin issue.',
       'Do not write a customer-facing reply. Do not include greeting, sign-off, markdown table, or hidden reasoning.',
@@ -361,7 +362,10 @@ function issuePromptPayload({ context, hint = '' }) {
     JSON.stringify(context?.supportCase || null, null, 2),
     '',
     'Delivery estimate:',
-    JSON.stringify(context?.deliveryEstimateContext || null, null, 2)
+    JSON.stringify(context?.deliveryEstimateContext || null, null, 2),
+    '',
+    'Existing open tickets for selected order:',
+    JSON.stringify(context?.issueContext || null, null, 2)
   ].join('\n');
 }
 
@@ -424,8 +428,9 @@ function buildIssueMessage({ issueType, details, order }) {
   return `${issueLabel(issueType)} issue for order ${normalizeOrderRef(order.name)}: ${cleanDetails}`;
 }
 
-function formatProposal(proposal) {
+function formatProposal(proposal, context = {}) {
   return [
+    ...formatOpenTicketNotice(context),
     'New issue proposal:',
     '',
     `Order: ${proposal.order_ref}`,
@@ -437,6 +442,26 @@ function formatProposal(proposal) {
     '',
     'Reply with changes, or use /newticket approve to create it.'
   ].join('\n');
+}
+
+function formatOpenTicketNotice(context = {}) {
+  const issues = Array.isArray(context.issueContext?.issues) ? context.issueContext.issues : [];
+  if (!issues.length) return [];
+  const lines = [
+    `Open ticket already exists for ${context.issueContext.order_ref || 'this order'}:`
+  ];
+  for (const issue of issues.slice(0, 3)) {
+    const parts = [
+      issue.issue_id ? `#${issue.issue_id}` : '',
+      issue.issue_type || '',
+      issue.provider || '',
+      issue.status || ''
+    ].filter(Boolean);
+    lines.push(`- ${parts.join(' · ')}${issue.url ? ` · ${issue.url}` : ''}`);
+  }
+  if (issues.length > 3) lines.push(`- ${issues.length - 3} more open ticket(s).`);
+  lines.push('Review the existing ticket before creating another one.', '');
+  return lines;
 }
 
 function ticketResponse(assistantMessage, {

@@ -8,6 +8,7 @@ import { fetchConversationMessages, createPrivateNote, prepareDraftReply } from 
 import { getShopifyContext } from './shopify.js';
 import { getAssignedProviders } from './provider-lookup.js';
 import { getDeliveryEstimateContext } from './delivery-estimates.js';
+import { getIssueContext } from './issue-lookup.js';
 import { applyAgentDraftLanguageOverride, detectLanguageFromText, inferResponseLanguage } from './language.js';
 import { detectSupportCase } from './support-case.js';
 import { enforceDraftRequirements } from './draft-rules.js';
@@ -114,7 +115,8 @@ async function handleSuggestReply(req, res) {
     agentEmail: body.agent_email,
     responseLanguage: context.responseLanguage,
     supportCase: context.supportCase,
-    deliveryEstimateContext: context.deliveryEstimateContext
+    deliveryEstimateContext: context.deliveryEstimateContext,
+    issueContext: context.issueContext
   });
 
   const result = await generateDraftWithOpenAI({ config, prompt, fallback });
@@ -131,12 +133,13 @@ async function handleSuggestReply(req, res) {
     reasoning_summary: result.reasoning_summary,
     shopify_context: context.shopifyContext,
     provider_context: context.providerContext,
+    issue_context: context.issueContext,
     context_summary: summarizeContext(context),
     contact_email: context.contactEmail,
     response_language: context.responseLanguage,
     support_case: context.supportCase,
     confidence: result.confidence,
-    warnings: uniqueStrings(result.warnings)
+    warnings: uniqueStrings([...(result.warnings || []), ...context.warnings])
   });
 }
 
@@ -253,7 +256,8 @@ async function handleCopilotChat(req, res) {
     supportCase: context.supportCase,
     agentConfirmedFacts,
     deliveryEstimateContext: context.deliveryEstimateContext,
-    approvedMemories: memoryResult.memories
+    approvedMemories: memoryResult.memories,
+    issueContext: context.issueContext
   });
 
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
@@ -325,6 +329,7 @@ function sendCopilotChatResponse(res, {
     reasoning_summary: reasoningSummary,
     shopify_context: context.shopifyContext,
     provider_context: context.providerContext,
+    issue_context: context.issueContext,
     context_summary: summarizeContext(responseContext),
     contact_email: context.contactEmail,
     response_language: responseContext.responseLanguage,
@@ -403,11 +408,25 @@ async function prepareConversationContext(body) {
     warnings: [`Delivery analytics lookup failed: ${error.message}`]
   }));
 
+  const issueContext = await getIssueContext({
+    config,
+    order: shopifyContext.selected_order
+  }).catch(error => ({
+    available: false,
+    source: null,
+    reason: 'lookup_failed',
+    order_ref: shopifyContext.selected_order?.name || null,
+    total: 0,
+    issues: [],
+    warnings: [`Issue lookup failed: ${error.message}`]
+  }));
+
   const warnings = uniqueStrings([
     ...(chatwootResult.warnings || []),
     ...(shopifyContext.warnings || []),
     ...(providerContext.warnings || []),
-    ...(deliveryEstimateContext?.warnings || [])
+    ...(deliveryEstimateContext?.warnings || []),
+    ...(issueContext?.warnings || [])
   ]);
   const responseLanguage = inferResponseLanguage({ latestMessage, shopifyContext });
   const supportCase = detectSupportCase({ latestMessage, conversationText, shopifyContext });
@@ -424,6 +443,7 @@ async function prepareConversationContext(body) {
     shopifyContext,
     providerContext,
     deliveryEstimateContext,
+    issueContext,
     responseLanguage,
     supportCase,
     warnings
@@ -484,6 +504,7 @@ function contextPayload(context) {
     support_case: context.supportCase,
     provider_context: context.providerContext,
     delivery_estimate_context: context.deliveryEstimateContext,
+    issue_context: context.issueContext,
     shopify_context: context.shopifyContext,
     context_summary: summarizeContext(context),
     warnings: context.warnings
@@ -500,6 +521,7 @@ function summarizeContext(context) {
       selected_order_ref: null,
       order_candidates: summarizeOrderCandidates(context.shopifyContext.orders),
       delivery_estimate_context: null,
+      issue_context: context.issueContext,
       response_language: context.responseLanguage,
       support_case: context.supportCase
     };
@@ -529,6 +551,7 @@ function summarizeContext(context) {
     tracking_number: tracking?.number || null,
     tracking_url: buildPublicTrackingUrl(tracking?.number) || tracking?.url || null,
     delivery_estimate_context: context.deliveryEstimateContext,
+    issue_context: context.issueContext,
     shipping_country: order.shipping_address?.country || null,
     shipping_country_code: order.shipping_address?.country_code || null,
     response_language: context.responseLanguage,

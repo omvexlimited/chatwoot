@@ -48,6 +48,42 @@ test('uses optional newticket hint with context when OpenAI is unavailable', asy
   assert.match(result.pending_issue.message, /supplier says no stock for XL/i);
 });
 
+test('warns about existing open ticket before showing a new proposal', async t => {
+  mockFetch(t, async () => openAiResponse({
+    action: 'proposal',
+    issue_type: 'shipping',
+    message: 'Shipping issue for order #2590: ask supplier to check handoff.',
+    confidence: 'medium',
+    warnings: []
+  }));
+
+  const result = await runNewTicketCommand({
+    command: parseCopilotCommand('/newticket'),
+    config: openAiConfig(),
+    context: context({
+      issueContext: {
+        available: true,
+        order_ref: '#2590',
+        total: 1,
+        issues: [
+          {
+            issue_id: 22,
+            issue_type: 'shipping',
+            provider: 'Mign Jin (1)',
+            status: 'open',
+            url: 'https://admin.example.com/kits-republic/issues/22'
+          }
+        ]
+      }
+    })
+  });
+
+  assert.match(result.assistant_message, /Open ticket already exists/i);
+  assert.match(result.assistant_message, /#22 · shipping · Mign Jin \(1\) · open/);
+  assert.match(result.assistant_message, /New issue proposal/);
+  assert.match(result.assistant_message, /\/newticket approve/);
+});
+
 test('asks for detail when newticket has no hint and OpenAI is unavailable', async () => {
   const result = await runNewTicketCommand({
     command: parseCopilotCommand('/newticket'),
@@ -163,6 +199,7 @@ function context(overrides = {}) {
     conversationText: overrides.conversationText || 'Customer: The supplier says size XL is not available.',
     supportCase: overrides.supportCase || null,
     deliveryEstimateContext: null,
+    issueContext: overrides.issueContext || null,
     shopifyContext: {
       selected_order: {
         name: '#2590',

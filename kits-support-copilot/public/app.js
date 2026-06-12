@@ -839,6 +839,10 @@ function renderContextCard(card) {
     node.append(renderLineItem(item));
   }
 
+  for (const ticket of card.tickets || []) {
+    node.append(renderTicket(ticket));
+  }
+
   if (card.action?.url) {
     const link = document.createElement('a');
     link.className = 'contextAction';
@@ -850,6 +854,49 @@ function renderContextCard(card) {
   }
 
   return node;
+}
+
+function renderTicket(ticket) {
+  const item = document.createElement('div');
+  item.className = 'ticketItem';
+
+  const title = document.createElement('strong');
+  title.textContent = [
+    ticket.title || 'Open ticket',
+    ticket.type || ''
+  ].filter(Boolean).join(' · ');
+  item.append(title);
+
+  const metaParts = [
+    ticket.provider,
+    ticket.status,
+    ticket.date ? `created ${ticket.date}` : ''
+  ].filter(Boolean);
+  if (metaParts.length) {
+    const meta = document.createElement('span');
+    meta.className = 'ticketMeta';
+    meta.textContent = metaParts.join(' | ');
+    item.append(meta);
+  }
+
+  if (ticket.message) {
+    const preview = document.createElement('span');
+    preview.className = 'ticketPreview';
+    preview.textContent = ticket.message;
+    item.append(preview);
+  }
+
+  if (ticket.url) {
+    const link = document.createElement('a');
+    link.className = 'contextAction';
+    link.href = ticket.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'Open ticket';
+    item.append(link);
+  }
+
+  return item;
 }
 
 function renderLineItem(lineItem) {

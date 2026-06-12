@@ -16,6 +16,7 @@ export function buildContextView(result = {}) {
   const trackingNumber = summary.tracking_number || orderTracking(order)?.number || null;
   const trackingCarrier = summary.tracking_carrier || orderTracking(order)?.company || null;
   const deliveryEstimate = result.delivery_estimate_context || summary.delivery_estimate_context || null;
+  const issueContext = result.issue_context || summary.issue_context || null;
   const orderCandidates = normalizeOrderCandidates(summary.order_candidates);
   const lineItems = normalizeLineItems(summary.line_items || order?.line_items);
 
@@ -30,6 +31,7 @@ export function buildContextView(result = {}) {
     cards: [
       customerCard({ result, summary, responseLanguage }),
       orderCard({ orderName, orderDate, adminOrderUrl, shopifyAdminUrl, provider, fulfillmentDate, fulfillmentStatus, summary }),
+      ticketsCard(issueContext),
       itemsCard(lineItems),
       ordersCard(orderCandidates),
       trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate }),
@@ -40,6 +42,7 @@ export function buildContextView(result = {}) {
       context_summary: summary,
       support_case: supportCase,
       delivery_estimate_context: deliveryEstimate,
+      issue_context: issueContext,
       warnings,
       shopify_context: shopify
     }
@@ -51,6 +54,19 @@ function itemsCard(lineItems) {
   return {
     title: 'Items',
     items: lineItems
+  };
+}
+
+function ticketsCard(issueContext) {
+  const tickets = normalizeTickets(issueContext?.issues);
+  if (!tickets.length) return null;
+  return {
+    title: 'Tickets',
+    rows: [
+      { label: 'Open', value: String(issueContext.total || tickets.length) }
+    ],
+    tickets,
+    emphasis: true
   };
 }
 
@@ -167,6 +183,21 @@ function normalizeOrderCandidates(candidates) {
     shopify_admin_url: safeHttpUrl(candidate.shopify_admin_url),
     selected: Boolean(candidate.selected)
   }));
+}
+
+function normalizeTickets(issues = []) {
+  if (!Array.isArray(issues)) return [];
+  return issues.map(issue => ({
+    issue_id: issue.issue_id || null,
+    title: issue.issue_id ? `#${issue.issue_id}` : 'Open ticket',
+    type: issue.issue_type || '-',
+    provider: issue.provider || '',
+    status: issue.status || '',
+    message: issue.message_preview || '',
+    date: formatContextDate(issue.created_at),
+    updated: formatContextDate(issue.updated_at),
+    url: safeHttpUrl(issue.url)
+  })).filter(issue => issue.issue_id || issue.message || issue.url);
 }
 
 function normalizeLineItems(items) {

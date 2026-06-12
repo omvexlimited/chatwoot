@@ -110,7 +110,42 @@ test('keeps raw context payload for debugging', () => {
 
   assert.equal(view.rawPayload.context_summary.order, '#1421');
   assert.equal(view.rawPayload.support_case.type, 'customs_pending');
+  assert.equal(view.rawPayload.issue_context.available, true);
   assert.deepEqual(view.rawPayload.warnings, ['Multiple orders matched.']);
+});
+
+test('shows open tickets card when issue context has active tickets', () => {
+  const view = buildContextView(contextResult({
+    issueContext: {
+      available: true,
+      source: 'kits_internal_api',
+      reason: 'open_issues_found',
+      order_ref: '#1421',
+      total: 1,
+      issues: [
+        {
+          issue_id: 22,
+          order_ref: '#1421',
+          provider: 'Mign Jin (1)',
+          issue_type: 'shipping',
+          status: 'open',
+          message_preview: 'Supplier needs to confirm local handoff.',
+          created_at: '2026-06-05T10:00:00Z',
+          updated_at: '2026-06-06T10:00:00Z',
+          url: 'https://web-production-c1320.up.railway.app/kits-republic/issues/22'
+        }
+      ]
+    }
+  }));
+  const tickets = view.cards.find(card => card.title === 'Tickets');
+
+  assert.equal(tickets.emphasis, true);
+  assert.deepEqual(tickets.rows.map(row => row.value), ['1']);
+  assert.equal(tickets.tickets[0].title, '#22');
+  assert.equal(tickets.tickets[0].type, 'shipping');
+  assert.equal(tickets.tickets[0].provider, 'Mign Jin (1)');
+  assert.equal(tickets.tickets[0].message, 'Supplier needs to confirm local handoff.');
+  assert.equal(tickets.tickets[0].url, 'https://web-production-c1320.up.railway.app/kits-republic/issues/22');
 });
 
 test('builds order candidate card for multiple Shopify orders', () => {
@@ -158,7 +193,15 @@ function contextResult({
   trackingUrl = 'https://tracking.example.test',
   trackingCarrier = 'CTT Express',
   deliveryEstimate = null,
-  orderCandidates = []
+  orderCandidates = [],
+  issueContext = {
+    available: true,
+    source: 'kits_internal_api',
+    reason: 'no_open_issues',
+    order_ref: '#1421',
+    total: 0,
+    issues: []
+  }
 } = {}) {
   return {
     contact_email: 'customer@example.com',
@@ -202,10 +245,12 @@ function contextResult({
       tracking_number: trackingNumber,
       tracking_url: trackingUrl,
       delivery_estimate_context: deliveryEstimate,
+      issue_context: issueContext,
       shipping_country: 'Spain',
       shipping_country_code: 'ES',
       order_candidates: orderCandidates
     },
+    issue_context: issueContext,
     shopify_context: {
       selected_order: {
         name: '#1421',

@@ -446,6 +446,38 @@ pre {
   line-height: 1.35;
 }
 
+.ticketItem {
+  display: block;
+  border-top: 1px solid #dbeafe;
+  padding: 8px 0;
+}
+
+.ticketItem:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.ticketItem strong,
+.ticketItem span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.ticketMeta {
+  margin-top: 3px;
+  color: #69717d;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.ticketPreview {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .insertNotice {
   display: flex;
   align-items: center;
