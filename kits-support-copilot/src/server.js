@@ -14,6 +14,13 @@ import { enforceDraftRequirements } from './draft-rules.js';
 import { buildPublicTrackingUrl } from './tracking-url.js';
 import { extractAgentConfirmedFacts } from './agent-facts.js';
 import {
+  ensureMemoryTable,
+  formatPromptMemories,
+  getRelevantMemories,
+  latestUserCommand,
+  runMemoryCommand
+} from './memory.js';
+import {
   buildCopilotChatPrompt,
   buildFallbackDraft,
   buildPrompt,
@@ -27,6 +34,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, '..', 'public');
 const config = loadConfig();
 const knowledgeBase = await loadKnowledgeBase();
+await ensureMemoryTable({ config }).catch(error => {
+  console.warn(`KR Copilot memory disabled: ${error.message}`);
+});
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -139,12 +149,50 @@ async function handleCopilotChat(req, res) {
   const responseContext = { ...context, responseLanguage: effectiveResponseLanguage };
   const agentConfirmedFacts = extractAgentConfirmedFacts(chatMessages);
   const currentDraft = String(body.current_draft || '').trim();
+  const command = latestUserCommand(chatMessages);
+  const commandResult = await runMemoryCommand({
+    command,
+    config,
+    context: responseContext,
+    agentEmail: body.agent_email,
+    currentDraft
+  }).catch(error => ({
+    handled: true,
+    assistant_message: `Command failed: ${error.message}`,
+    reasoning_summary: 'KR Copilot command failed.',
+    confidence: 'low',
+    warnings: [error.message],
+    preserve_draft: true,
+    skip_insert: true
+  }));
+
+  if (commandResult?.handled) {
+    return sendCopilotChatResponse(res, {
+      context,
+      responseContext,
+      assistantMessage: commandResult.assistant_message,
+      draft: currentDraft,
+      reasoningSummary: commandResult.reasoning_summary,
+      confidence: commandResult.confidence,
+      warnings: commandResult.warnings,
+      agentConfirmedFacts,
+      preserveDraft: commandResult.preserve_draft,
+      skipInsert: commandResult.skip_insert,
+      approvedMemories: []
+    });
+  }
+
+  const memoryResult = await getRelevantMemories({
+    config,
+    context: responseContext,
+    chatMessages
+  });
 
   const fallbackDraft = buildFallbackDraft({
     shopifyContext: context.shopifyContext,
     latestMessage: context.latestMessage
   });
-  fallbackDraft.warnings.push(...context.warnings);
+  fallbackDraft.warnings.push(...context.warnings, ...memoryResult.warnings);
 
   const fallback = {
     assistant_message: buildFallbackAssistantMessage({ context: responseContext, currentDraft, agentConfirmedFacts }),
@@ -167,7 +215,8 @@ async function handleCopilotChat(req, res) {
     responseLanguage: effectiveResponseLanguage,
     supportCase: context.supportCase,
     agentConfirmedFacts,
-    deliveryEstimateContext: context.deliveryEstimateContext
+    deliveryEstimateContext: context.deliveryEstimateContext,
+    approvedMemories: memoryResult.memories
   });
 
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
@@ -184,19 +233,16 @@ async function handleCopilotChat(req, res) {
     deliveryEstimateContext: context.deliveryEstimateContext
   });
 
-  return sendJson(res, 200, {
-    assistant_message: assistantMessage,
+  return sendCopilotChatResponse(res, {
+    context,
+    responseContext,
+    assistantMessage,
     draft,
-    reasoning_summary: result.reasoning_summary,
-    shopify_context: context.shopifyContext,
-    provider_context: context.providerContext,
-    context_summary: summarizeContext(responseContext),
-    contact_email: context.contactEmail,
-    response_language: effectiveResponseLanguage,
-    support_case: context.supportCase,
-    agent_confirmed_facts: agentConfirmedFacts,
+    reasoningSummary: result.reasoning_summary,
     confidence: result.confidence,
-    warnings: uniqueStrings(result.warnings)
+    warnings: [...(result.warnings || []), ...memoryResult.warnings],
+    agentConfirmedFacts,
+    approvedMemories: memoryResult.memories
   });
 }
 
@@ -220,6 +266,38 @@ async function handlePrivateNote(req, res) {
 
   await createPrivateNote({ config, accountId, conversationId, content: note });
   return sendJson(res, 200, { ok: true });
+}
+
+function sendCopilotChatResponse(res, {
+  context,
+  responseContext,
+  assistantMessage,
+  draft,
+  reasoningSummary,
+  confidence,
+  warnings = [],
+  agentConfirmedFacts = [],
+  approvedMemories = [],
+  preserveDraft = false,
+  skipInsert = false
+}) {
+  return sendJson(res, 200, {
+    assistant_message: assistantMessage,
+    draft,
+    reasoning_summary: reasoningSummary,
+    shopify_context: context.shopifyContext,
+    provider_context: context.providerContext,
+    context_summary: summarizeContext(responseContext),
+    contact_email: context.contactEmail,
+    response_language: responseContext.responseLanguage,
+    support_case: context.supportCase,
+    agent_confirmed_facts: agentConfirmedFacts,
+    approved_memories: formatPromptMemories(approvedMemories),
+    confidence,
+    warnings: uniqueStrings(warnings),
+    preserve_draft: preserveDraft,
+    skip_insert: skipInsert
+  });
 }
 
 async function handlePrepareReply(req, res) {

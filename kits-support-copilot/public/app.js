@@ -228,12 +228,14 @@ async function sendAgentMessage(rawMessage) {
       role: 'assistant',
       content: result.assistant_message || 'Draft updated.'
     });
-    els.draft.value = result.draft || '';
+    if (!result.preserve_draft) {
+      els.draft.value = result.draft || '';
+    }
     els.confidence.textContent = `confidence: ${result.confidence || 'n/a'}`;
     renderChat();
     renderContext(state.contextResult);
     persistSession();
-    if (isSidebarLayout && result.draft) {
+    if (isSidebarLayout && result.draft && !result.skip_insert && !result.preserve_draft) {
       await autoInsertReply(result.draft);
     } else {
       setStatus('Ready');

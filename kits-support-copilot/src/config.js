@@ -15,6 +15,8 @@ export function loadConfig(env = process.env) {
     openaiApiKey: envValue(env, ['OPENAI_API_KEY']),
     openaiModel: envValue(env, ['OPENAI_MODEL'], 'gpt-5.4-mini'),
     openaiBaseUrl,
+    copilotDatabaseUrl: envValue(env, ['COPILOT_DATABASE_URL', 'DATABASE_URL']),
+    copilotDatabaseSsl: envValue(env, ['COPILOT_DATABASE_SSL', 'DATABASE_SSL'], 'true').toLowerCase() !== 'false',
     shopifyStoreDomain,
     shopifyAdminAccessToken: envValue(env, ['SHOPIFY_ADMIN_ACCESS_TOKEN', 'SHOPIFY_ADMIN_API_ACCESS_TOKEN']),
     shopifyClientId: envValue(env, ['SHOPIFY_CLIENT_ID', 'SHOPIFY_KITS_REPUBLIC_CLIENT_ID']),
@@ -42,6 +44,7 @@ export function getConfigStatus(config) {
     shopify_auth_mode: shopifyAuthMode(config),
     delivery_analytics: Boolean(config.krAnalyticsDatabaseUrl),
     provider_lookup: Boolean(config.krProviderDatabaseUrl),
+    memory: Boolean(config.copilotDatabaseUrl),
     chatwoot: Boolean(config.chatwootBaseUrl && config.chatwootApiToken),
     api_token_required: Boolean(config.copilotApiToken)
   };

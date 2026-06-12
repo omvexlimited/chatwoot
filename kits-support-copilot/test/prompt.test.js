@@ -550,3 +550,53 @@ test('honors explicit Catalan draft language request from the agent', () => {
   assert.match(prompt.system, /If Response language source is agent_explicit_language_request/);
   assert.doesNotMatch(prompt.user, /DRAFT_LANGUAGE_LOCK: Spanish/);
 });
+
+test('passes approved support memories to copilot chat prompt', () => {
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Guide text',
+    conversationText: 'INCOMING Customer: Royal Mail has no updates.',
+    shopifyContext: {
+      selected_order: {
+        name: '#3333',
+        shipping_address: { country_code: 'GB' },
+        fulfillments: [
+          {
+            tracking_numbers: ['GV123'],
+            tracking: [{ company: 'Royal Mail', number: 'GV123' }]
+          }
+        ]
+      },
+      selection_reason: 'Matched explicit order #3333.',
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'Royal Mail has no updates.',
+    agentEmail: 'agent@example.com',
+    responseLanguage: {
+      language: 'English',
+      source: 'latest_customer_message',
+      country_code: 'GB'
+    },
+    supportCase: {
+      type: 'customs_pending',
+      confidence: 'medium',
+      reasons: ['tracking_present', 'local_handoff_carrier:Royal Mail']
+    },
+    approvedMemories: [
+      {
+        id: 4,
+        content: 'For Royal Mail no updates, explain customs clearance in normal language.',
+        support_case_type: 'customs_pending',
+        carrier: 'Royal Mail',
+        language: 'English'
+      }
+    ],
+    chatMessages: [{ role: 'user', content: 'Generate a reply.' }]
+  });
+
+  assert.match(prompt.system, /Approved support memories are global, agent-approved know-how/);
+  assert.match(prompt.system, /current agent instructions and agent_confirmed_facts override approved memories/);
+  assert.match(prompt.system, /must not replace actual Shopify order facts/);
+  assert.match(prompt.user, /Approved support memories/);
+  assert.match(prompt.user, /For Royal Mail no updates, explain customs clearance in normal language/);
+});

@@ -8,6 +8,7 @@ import {
   inferResponseLanguage
 } from './language.js';
 import { buildPublicTrackingUrl, firstTrackingNumberFromShopifyContext } from './tracking-url.js';
+import { formatPromptMemories } from './memory.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -108,7 +109,8 @@ export function buildCopilotChatPrompt({
   responseLanguage,
   supportCase,
   agentConfirmedFacts = [],
-  deliveryEstimateContext
+  deliveryEstimateContext,
+  approvedMemories = []
 }) {
   const normalizedChatMessages = normalizeChatMessages(chatMessages);
   const baseResponseLanguage = responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext });
@@ -123,6 +125,7 @@ export function buildCopilotChatPrompt({
   const agentChatLanguage = inferAgentChatLanguage(normalizedChatMessages);
   const chatTranscript = JSON.stringify(normalizedChatMessages.slice(-16), null, 2);
   const agentConfirmedFactsSummary = JSON.stringify(normalizeAgentConfirmedFacts(agentConfirmedFacts), null, 2);
+  const approvedMemoriesSummary = JSON.stringify(formatPromptMemories(approvedMemories), null, 2);
 
   return {
     system: [
@@ -135,6 +138,8 @@ export function buildCopilotChatPrompt({
       'Agent chat messages are trusted operational context for external actions that may not exist in Shopify or Chatwoot, including Telegram/supplier confirmations.',
       'If the agent explicitly states that an action is already confirmed, processed, authorized, reported to the supplier, agreed with the supplier, or otherwise already done, treat that statement as true and include it in the customer draft when relevant.',
       'Context hierarchy: agent instructions and agent_confirmed_facts override Shopify for operational updates; Shopify is only baseline order data for fields the agent has not corrected.',
+      'Approved support memories are global, agent-approved know-how from prior support corrections. Use them when relevant, but current agent instructions and agent_confirmed_facts override approved memories.',
+      'Approved support memories guide wording, policy handling, and recurring case interpretation. They must not replace actual Shopify order facts, tracking numbers, customer email, or selected order data.',
       'If agent_confirmed_facts conflict with Shopify tracking status, use agent_confirmed_facts for the customer-facing operational status. Do not surface the conflict unless the agent explicitly asks for an audit.',
       'If agent_confirmed_facts contains customs_cleared, local_carrier_has_parcel, carrier_will_deliver_soon, or parcel_ready_for_delivery, you may say customs have cleared, the local carrier has the parcel, the carrier will deliver soon, or the parcel is ready for delivery even if Shopify still says Shipment Announced, CONFIRMED, or similar.',
       'If agent_confirmed_facts contains customer_email_was_missing, customer_email_added, future_updates_enabled, or order_access_link_provided, use those facts directly in the customer draft.',
@@ -174,6 +179,9 @@ export function buildCopilotChatPrompt({
       '',
       'Agent confirmed facts:',
       agentConfirmedFactsSummary,
+      '',
+      'Approved support memories:',
+      approvedMemoriesSummary,
       '',
       'Latest customer message:',
       latestMessage || '(not provided)',

@@ -17,6 +17,7 @@ Required for full functionality:
 Recommended:
 
 - `COPILOT_API_TOKEN` shared token used by the embedded Dashboard App URL.
+- `COPILOT_DATABASE_URL` for persistent global memory commands. Falls back to `DATABASE_URL`.
 - `OPENAI_MODEL` defaults to `gpt-5.4-mini`.
 - `SHOPIFY_API_VERSION` defaults to `2026-04`.
 
@@ -40,6 +41,17 @@ https://YOUR-COPILOT-SERVICE.up.railway.app/?token=YOUR_COPILOT_API_TOKEN
 The service only creates private notes when the agent clicks that button. It never sends customer replies.
 
 `Insert reply` places the current draft in Chatwoot's public reply composer for human review. It does not send the message to the customer.
+
+## Chat Commands
+
+Inside the KR Copilot chat:
+
+- `/remember <text>` saves a global support memory.
+- `/memories` lists the latest active memories.
+- `/forget <id>` disables a saved memory.
+- `/help` shows the available commands.
+
+Memory commands do not call OpenAI, do not edit the draft, and do not insert anything into the Chatwoot composer.
 
 ## Deployed Service
 

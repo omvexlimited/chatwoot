@@ -18,6 +18,7 @@ test('supports Shopify Dev Dashboard client credentials aliases', () => {
     shopify_auth_mode: 'client_credentials',
     delivery_analytics: false,
     provider_lookup: false,
+    memory: false,
     chatwoot: false,
     api_token_required: false
   });
@@ -74,4 +75,24 @@ test('supports delivery analytics database aliases and thresholds', () => {
   assert.equal(config.krAnalyticsMinFulfilled, 30);
   assert.equal(config.krAnalyticsMinDelivered, 15);
   assert.equal(getConfigStatus(config).delivery_analytics, true);
+});
+
+test('supports copilot memory database aliases', () => {
+  const config = loadConfig({
+    COPILOT_DATABASE_URL: 'postgres://memory',
+    COPILOT_DATABASE_SSL: 'false'
+  });
+
+  assert.equal(config.copilotDatabaseUrl, 'postgres://memory');
+  assert.equal(config.copilotDatabaseSsl, false);
+  assert.equal(getConfigStatus(config).memory, true);
+});
+
+test('falls back to DATABASE_URL for copilot memory', () => {
+  const config = loadConfig({
+    DATABASE_URL: 'postgres://railway'
+  });
+
+  assert.equal(config.copilotDatabaseUrl, 'postgres://railway');
+  assert.equal(getConfigStatus(config).memory, true);
 });
