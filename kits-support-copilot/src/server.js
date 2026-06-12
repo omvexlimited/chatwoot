@@ -7,6 +7,7 @@ import { loadConfig, getConfigStatus } from './config.js';
 import { fetchConversationMessages, createPrivateNote, prepareDraftReply } from './chatwoot.js';
 import { getShopifyContext } from './shopify.js';
 import { getAssignedProvider } from './provider-lookup.js';
+import { getDeliveryEstimateContext } from './delivery-estimates.js';
 import { detectLanguageFromText, inferResponseLanguage } from './language.js';
 import { detectSupportCase } from './support-case.js';
 import { enforceDraftRequirements } from './draft-rules.js';
@@ -97,7 +98,8 @@ async function handleSuggestReply(req, res) {
     latestMessage: context.latestMessage,
     agentEmail: body.agent_email,
     responseLanguage: context.responseLanguage,
-    supportCase: context.supportCase
+    supportCase: context.supportCase,
+    deliveryEstimateContext: context.deliveryEstimateContext
   });
 
   const result = await generateDraftWithOpenAI({ config, prompt, fallback });
@@ -161,7 +163,8 @@ async function handleCopilotChat(req, res) {
     currentDraft,
     responseLanguage: context.responseLanguage,
     supportCase: context.supportCase,
-    agentConfirmedFacts
+    agentConfirmedFacts,
+    deliveryEstimateContext: context.deliveryEstimateContext
   });
 
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
@@ -266,10 +269,21 @@ async function prepareConversationContext(body) {
   }));
   attachProviderToShopifyContext(shopifyContext, providerContext);
 
+  const deliveryEstimateContext = await getDeliveryEstimateContext({
+    config,
+    order: shopifyContext.selected_order
+  }).catch(error => ({
+    available: false,
+    source: null,
+    reason: 'lookup_failed',
+    warnings: [`Delivery analytics lookup failed: ${error.message}`]
+  }));
+
   const warnings = uniqueStrings([
     ...(chatwootResult.warnings || []),
     ...(shopifyContext.warnings || []),
-    ...(providerContext.warnings || [])
+    ...(providerContext.warnings || []),
+    ...(deliveryEstimateContext?.warnings || [])
   ]);
   const responseLanguage = inferResponseLanguage({ latestMessage, shopifyContext });
   const supportCase = detectSupportCase({ latestMessage, conversationText, shopifyContext });
@@ -285,6 +299,7 @@ async function prepareConversationContext(body) {
     chatwootAvailable: Boolean(chatwootResult.available),
     shopifyContext,
     providerContext,
+    deliveryEstimateContext,
     responseLanguage,
     supportCase,
     warnings
@@ -311,6 +326,7 @@ function contextPayload(context) {
     response_language: context.responseLanguage,
     support_case: context.supportCase,
     provider_context: context.providerContext,
+    delivery_estimate_context: context.deliveryEstimateContext,
     shopify_context: context.shopifyContext,
     context_summary: summarizeContext(context),
     warnings: context.warnings
@@ -326,6 +342,7 @@ function summarizeContext(context) {
       status: 'No single Shopify order selected.',
       selected_order_ref: null,
       order_candidates: summarizeOrderCandidates(context.shopifyContext.orders),
+      delivery_estimate_context: null,
       response_language: context.responseLanguage,
       support_case: context.supportCase
     };
@@ -353,6 +370,7 @@ function summarizeContext(context) {
     tracking_carrier: tracking?.company || null,
     tracking_number: tracking?.number || null,
     tracking_url: buildPublicTrackingUrl(tracking?.number) || tracking?.url || null,
+    delivery_estimate_context: context.deliveryEstimateContext,
     shipping_country: order.shipping_address?.country || null,
     shipping_country_code: order.shipping_address?.country_code || null,
     response_language: context.responseLanguage,

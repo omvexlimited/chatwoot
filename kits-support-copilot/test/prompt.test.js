@@ -57,6 +57,8 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /Apple Pay\/no confirmation email/);
   assert.match(prompt.system, /customs_pending/);
   assert.match(prompt.system, /customs inspection\/customs clearance/);
+  assert.match(prompt.system, /Delivery estimate rule/);
+  assert.match(prompt.system, /Never present it as a promise/);
   assert.match(prompt.system, /Pendiente de recepcion en CTT Express/);
   assert.match(prompt.system, /Pending receipt at CTT Express/);
   assert.match(prompt.system, /Pendiente de entrada en red/);
@@ -84,9 +86,59 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.user, /Support case/);
   assert.match(prompt.user, /customs_pending/);
   assert.match(prompt.user, /Customs context/);
+  assert.match(prompt.user, /Delivery estimate context/);
   assert.match(prompt.user, /kitsrepublic\.com\/apps\/17TRACK\?nums=0141605773793172/);
   assert.match(prompt.user, /Royal Mail expecting parcel/);
   assert.match(prompt.user, /Royal Mail does not recognise the tracking number yet/);
+});
+
+test('passes carrier delivery estimates to prompt with non-promissory rules', () => {
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Guide text',
+    conversationText: 'INCOMING Customer: Any update on delivery?',
+    shopifyContext: {
+      selected_order: {
+        name: '#8888',
+        fulfillments: [
+          {
+            created_at: '2026-06-10T12:00:00Z',
+            tracking_numbers: ['GV123'],
+            tracking: [{ company: 'Royal Mail', number: 'GV123' }]
+          }
+        ]
+      },
+      selection_reason: 'Matched explicit order #8888.',
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'Any update on delivery?',
+    agentEmail: 'agent@example.com',
+    deliveryEstimateContext: {
+      available: true,
+      source: 'kits_republic_orders',
+      carrier: 'Royal Mail',
+      avg_transit_days: 6.2,
+      delivered_pct: 86.6,
+      sample_size: 590,
+      fulfilled_count: 681,
+      delivered_count: 590,
+      fulfilled_at: '2026-06-10T12:00:00.000Z',
+      delivered_at: null,
+      days_since_fulfillment: 3.5,
+      estimated_remaining_days: 2.7,
+      confidence: 'high',
+      reason: 'recent_average'
+    },
+    chatMessages: [{ role: 'user', content: 'Tell them when it usually arrives.' }]
+  });
+
+  assert.match(prompt.system, /Use it only when available is true and confidence is high or medium/);
+  assert.match(prompt.system, /usually takes around X days after dispatch/);
+  assert.match(prompt.system, /do not say it will arrive today/);
+  assert.match(prompt.user, /Delivery estimate context/);
+  assert.match(prompt.user, /"carrier": "Royal Mail"/);
+  assert.match(prompt.user, /"avg_transit_days": 6.2/);
+  assert.match(prompt.user, /"estimated_remaining_days": 2.7/);
 });
 
 test('builds CTT customs context with pre-handoff explanation', () => {

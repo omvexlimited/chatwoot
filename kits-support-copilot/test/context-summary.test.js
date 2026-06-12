@@ -37,6 +37,68 @@ test('builds context summary without broken tracking action', () => {
   assert.deepEqual(tracking.rows.map(row => row.value), ['No tracking yet', 'No tracking yet', 'FULFILLED']);
 });
 
+test('shows carrier delivery estimate in tracking card when available', () => {
+  const view = buildContextView(contextResult({
+    deliveryEstimate: {
+      available: true,
+      carrier: 'CTT Express',
+      avg_transit_days: 10.7,
+      delivered_pct: 82.1,
+      sample_size: 299,
+      fulfilled_count: 364,
+      delivered_count: 299,
+      fulfilled_at: '2026-06-03T10:00:00Z',
+      delivered_at: null,
+      days_since_fulfillment: 4.2,
+      estimated_remaining_days: 6.5,
+      confidence: 'high',
+      reason: 'recent_average'
+    }
+  }));
+  const tracking = view.cards.find(card => card.title === 'Tracking');
+
+  assert.deepEqual(tracking.rows.map(row => row.label), [
+    'Carrier',
+    'Number',
+    'Status',
+    'Avg transit',
+    'Elapsed since fulfillment',
+    'Estimated remaining',
+    'Estimate confidence'
+  ]);
+  assert.deepEqual(tracking.rows.map(row => row.value), [
+    'CTT Express',
+    'KR123',
+    'FULFILLED',
+    '10.7 days',
+    '4.2 days',
+    '~6.5 days',
+    'high'
+  ]);
+  assert.equal(view.rawPayload.delivery_estimate_context.available, true);
+});
+
+test('shows actual transit time for delivered estimate without remaining days', () => {
+  const view = buildContextView(contextResult({
+    deliveryEstimate: {
+      available: true,
+      carrier: 'Royal Mail',
+      avg_transit_days: 6.2,
+      sample_size: 590,
+      fulfilled_at: '2026-06-03T10:00:00Z',
+      delivered_at: '2026-06-09T10:00:00Z',
+      days_since_fulfillment: 6,
+      estimated_remaining_days: 0,
+      confidence: 'high',
+      reason: 'already_delivered'
+    }
+  }));
+  const tracking = view.cards.find(card => card.title === 'Tracking');
+
+  assert.equal(tracking.rows.find(row => row.label === 'Transit time').value, '6 days');
+  assert.equal(tracking.rows.some(row => row.label === 'Estimated remaining'), false);
+});
+
 test('keeps raw context payload for debugging', () => {
   const view = buildContextView(contextResult());
 
@@ -87,6 +149,7 @@ function contextResult({
   trackingNumber = 'KR123',
   trackingUrl = 'https://tracking.example.test',
   trackingCarrier = 'CTT Express',
+  deliveryEstimate = null,
   orderCandidates = []
 } = {}) {
   return {
@@ -129,6 +192,7 @@ function contextResult({
       tracking_carrier: trackingCarrier,
       tracking_number: trackingNumber,
       tracking_url: trackingUrl,
+      delivery_estimate_context: deliveryEstimate,
       shipping_country: 'Spain',
       shipping_country_code: 'ES',
       order_candidates: orderCandidates

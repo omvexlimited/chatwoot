@@ -14,6 +14,7 @@ export function buildContextView(result = {}) {
   const trackingUrl = safeHttpUrl(summary.tracking_url || orderTracking(order)?.url);
   const trackingNumber = summary.tracking_number || orderTracking(order)?.number || null;
   const trackingCarrier = summary.tracking_carrier || orderTracking(order)?.company || null;
+  const deliveryEstimate = result.delivery_estimate_context || summary.delivery_estimate_context || null;
   const orderCandidates = normalizeOrderCandidates(summary.order_candidates);
   const lineItems = normalizeLineItems(summary.line_items || order?.line_items);
 
@@ -30,13 +31,14 @@ export function buildContextView(result = {}) {
       orderCard({ orderName, orderDate, shopifyAdminUrl, provider, fulfillmentDate, fulfillmentStatus, summary }),
       itemsCard(lineItems),
       ordersCard(orderCandidates),
-      trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary }),
+      trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate }),
       caseCard(supportCase),
       warningsCard(warnings)
     ].filter(Boolean),
     rawPayload: {
       context_summary: summary,
       support_case: supportCase,
+      delivery_estimate_context: deliveryEstimate,
       warnings,
       shopify_context: shopify
     }
@@ -89,17 +91,37 @@ function orderCard({ orderName, orderDate, shopifyAdminUrl, provider, fulfillmen
   };
 }
 
-function trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary }) {
+function trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate }) {
   const hasTracking = Boolean(trackingNumber || trackingUrl);
+  const estimateRows = trackingEstimateRows(deliveryEstimate);
   return {
     title: 'Tracking',
     rows: [
       { label: 'Carrier', value: trackingCarrier || (hasTracking ? '-' : 'No tracking yet') },
       { label: 'Number', value: trackingNumber || (hasTracking ? '-' : 'No tracking yet') },
-      { label: 'Status', value: summary.shipment_status || '-' }
+      { label: 'Status', value: summary.shipment_status || '-' },
+      ...estimateRows
     ],
     action: trackingUrl ? { label: 'Open tracking', url: trackingUrl } : null
   };
+}
+
+function trackingEstimateRows(estimate) {
+  if (!estimate?.available) return [];
+
+  const rows = [
+    { label: 'Avg transit', value: formatDays(estimate.avg_transit_days) }
+  ];
+
+  if (estimate.delivered_at) {
+    rows.push({ label: 'Transit time', value: formatDays(estimate.days_since_fulfillment) });
+  } else {
+    rows.push({ label: 'Elapsed since fulfillment', value: formatDays(estimate.days_since_fulfillment) });
+    rows.push({ label: 'Estimated remaining', value: formatRemainingDays(estimate.estimated_remaining_days) });
+  }
+
+  rows.push({ label: 'Estimate confidence', value: estimate.confidence || '-' });
+  return rows;
 }
 
 function ordersCard(orderCandidates) {
@@ -208,6 +230,19 @@ function formatLanguage(responseLanguage) {
 function formatReasons(reasons) {
   if (!Array.isArray(reasons) || !reasons.length) return '-';
   return reasons.slice(0, 4).join(', ');
+}
+
+function formatDays(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '-';
+  return `${number.toFixed(1).replace(/\.0$/, '')} days`;
+}
+
+function formatRemainingDays(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '-';
+  if (number <= 0) return '~0 days';
+  return `~${number.toFixed(1).replace(/\.0$/, '')} days`;
 }
 
 function safeHttpUrl(value) {

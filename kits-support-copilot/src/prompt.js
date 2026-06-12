@@ -27,12 +27,14 @@ export function buildPrompt({
   latestMessage,
   agentEmail,
   responseLanguage,
-  supportCase
+  supportCase,
+  deliveryEstimateContext
 }) {
   const responseLanguageHint = formatResponseLanguageHint(responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext }));
   const responseLanguageName = responseLanguage?.language || inferResponseLanguage({ latestMessage, shopifyContext }).language || 'English';
   const supportCaseSummary = JSON.stringify(supportCase || null, null, 2);
   const customsContext = buildCustomsContext({ shopifyContext, supportCase });
+  const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
   return {
@@ -54,6 +56,7 @@ export function buildPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       linkInstruction(),
       customsPendingInstruction(),
+      deliveryEstimateInstruction(),
       draftLanguageInstruction(),
       'Signature rule: close with a natural sign-off in the customer language, then a new line with exactly www.kitsrepublic.com. Never sign as "Equipo Kits Republic", "Kits Republic team", an agent name, or any team/company name.',
       'The draft field must contain only the customer-ready reply text, with no labels, no analysis, and no markdown tables.',
@@ -80,6 +83,9 @@ export function buildPrompt({
       'Customs context:',
       customsContext,
       '',
+      'Delivery estimate context:',
+      deliveryEstimateSummary,
+      '',
       'Shopify context:',
       shopifySummary
     ].join('\n')
@@ -96,12 +102,14 @@ export function buildCopilotChatPrompt({
   currentDraft = '',
   responseLanguage,
   supportCase,
-  agentConfirmedFacts = []
+  agentConfirmedFacts = [],
+  deliveryEstimateContext
 }) {
   const responseLanguageHint = formatResponseLanguageHint(responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext }));
   const responseLanguageName = responseLanguage?.language || inferResponseLanguage({ latestMessage, shopifyContext }).language || 'English';
   const supportCaseSummary = JSON.stringify(supportCase || null, null, 2);
   const customsContext = buildCustomsContext({ shopifyContext, supportCase });
+  const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
   const normalizedChatMessages = normalizeChatMessages(chatMessages);
@@ -138,6 +146,7 @@ export function buildCopilotChatPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       linkInstruction(),
       customsPendingInstruction(),
+      deliveryEstimateInstruction(),
       'assistant_message is for the support agent and can briefly explain what changed or what is missing.',
       'assistant_message must be written in the Agent chat language provided in the user message.',
       'draft must contain only the customer-ready reply text, with no labels, no analysis, and no markdown tables.',
@@ -170,6 +179,9 @@ export function buildCopilotChatPrompt({
       '',
       'Customs context:',
       customsContext,
+      '',
+      'Delivery estimate context:',
+      deliveryEstimateSummary,
       '',
       'Shopify context:',
       shopifySummary,
@@ -224,6 +236,19 @@ function linkInstruction() {
     'If you mention returns, refunds, exchanges, return shipping, or returns to China, include https://kitsrepublic.com/policies/refund-policy once.',
     'If you mention sizing advice, measurements, or the size guide, include https://kitsrepublic.com/pages/size-guide once.',
     'Format links as a label line, a blank line, then the URL. Never write Label:https://...'
+  ].join(' ');
+}
+
+function deliveryEstimateInstruction() {
+  return [
+    'Delivery estimate rule:',
+    'Delivery estimate context is internal historical carrier performance from delivered Kits Republic orders.',
+    'Use it only when available is true and confidence is high or medium.',
+    'Never present it as a promise, deadline, guaranteed delivery date, or exact ETA.',
+    'Use soft wording such as "usually takes around X days after dispatch" or "based on recent shipments with this carrier".',
+    'If estimated_remaining_days is 0 because the shipment is over the recent average, say it is taking longer than the recent carrier average and tracking should update automatically; do not say it will arrive today.',
+    'If Delivery estimate context is null, unavailable, low confidence, insufficient_sample, no_carrier_analytics, or missing fulfillment date, do not mention carrier-specific average transit days.',
+    'Delivery estimate context must never override actual delivered status, tracking status, customs_pending instructions, or agent_confirmed_facts.'
   ].join(' ');
 }
 
