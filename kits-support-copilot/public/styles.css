@@ -239,7 +239,7 @@ textarea {
 
 .composer textarea {
   grid-column: 1 / -1;
-  min-height: 72px;
+  min-height: 54px;
 }
 
 .composer {
@@ -598,7 +598,7 @@ body[data-layout='sidebar'] .composer {
 }
 
 body[data-layout='sidebar'] .composer textarea {
-  min-height: 58px;
+  min-height: 46px;
 }
 
 body[data-layout='sidebar'] .composer button {
