@@ -23,6 +23,7 @@ const props = defineProps({
   showAssignee: { type: Boolean, default: false },
   showInboxName: { type: Boolean, default: false },
   isInboxView: { type: Boolean, default: false },
+  conversationPath: { type: String, default: '' },
 });
 
 const emit = defineEmits([
@@ -69,6 +70,8 @@ const selectedModel = computed({
 <template>
   <div
     class="conversation relative cursor-pointer group grid gap-4 items-center px-3 h-12 border-b border-n-slate-3 hover:border-n-surface-1 hover:z-[1] before:content-[none] before:absolute before:-top-px before:inset-x-0 before:h-px before:bg-n-surface-1 before:pointer-events-none hover:before:content-['']"
+    :data-conversation-id="chat.id"
+    :data-conversation-path="conversationPath"
     :class="{
       'active animate-card-select bg-n-alpha-1 dark:bg-n-alpha-3 !border-n-surface-1':
         isActiveChat,

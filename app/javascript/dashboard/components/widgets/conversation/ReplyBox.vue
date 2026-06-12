@@ -784,7 +784,10 @@ export default {
     hideContentTemplatesModal() {
       this.showContentTemplatesModal = false;
     },
-    async confirmOnSendReply({ resolveAfterSend = false } = {}) {
+    async confirmOnSendReply({
+      resolveAfterSend = false,
+      nextConversation = null,
+    } = {}) {
       if (this.isReplyButtonDisabled) {
         return;
       }
@@ -829,7 +832,10 @@ export default {
         this.hideEmojiPicker();
 
         if (resolveAfterSend) {
-          await this.resolveAndOpenTopVisibleConversation(conversationId);
+          await this.resolveAndOpenAdjacentVisibleConversation({
+            conversationId,
+            nextConversation,
+          });
         }
       }
     },
@@ -913,14 +919,23 @@ export default {
 
         const ok = await this.$refs.confirmDialog.showConfirmation();
         if (ok) {
-          await this.confirmOnSendReply({ resolveAfterSend });
+          await this.confirmOnSendReply({
+            resolveAfterSend,
+            nextConversation: options?.nextConversation,
+          });
         }
       } else {
-        await this.confirmOnSendReply({ resolveAfterSend });
+        await this.confirmOnSendReply({
+          resolveAfterSend,
+          nextConversation: options?.nextConversation,
+        });
       }
     },
     async onSendAndResolveReply() {
-      await this.onSendReply({ resolveAfterSend: true });
+      const nextConversation = this.getAdjacentVisibleConversationTarget(
+        this.currentChat.id
+      );
+      await this.onSendReply({ resolveAfterSend: true, nextConversation });
     },
     async sendMessage(
       messagePayload,
@@ -947,40 +962,42 @@ export default {
         return false;
       }
     },
-    async resolveAndOpenTopVisibleConversation(conversationId) {
-      const activeConversationElement = document.querySelector(
-        'div.conversations-list div.conversation.active'
-      );
-
+    async resolveAndOpenAdjacentVisibleConversation({
+      conversationId,
+      nextConversation,
+    }) {
       await this.$store.dispatch('toggleStatus', {
         conversationId,
         status: wootConstants.STATUS_TYPE.RESOLVED,
       });
-      await this.$nextTick();
-      await new Promise(resolve => requestAnimationFrame(resolve));
 
-      const nextConversation = this.findTopVisibleConversation(
-        activeConversationElement
-      );
-
-      if (nextConversation) {
-        nextConversation.click();
+      if (nextConversation?.path) {
+        await this.$router.push({ path: nextConversation.path });
       } else {
         this.$store.dispatch('clearSelectedState');
       }
     },
-    findTopVisibleConversation(activeConversationElement) {
+    getAdjacentVisibleConversationTarget(conversationId) {
       const conversations = [
-        ...document.querySelectorAll('div.conversations-list div.conversation'),
-      ];
-
-      return conversations.find(conversation => {
+        ...document.querySelectorAll(
+          'div.conversations-list div.conversation[data-conversation-id]'
+        ),
+      ].filter(conversation => this.isVisibleConversation(conversation));
+      const currentIndex = conversations.findIndex(conversation => {
         return (
-          conversation !== activeConversationElement &&
-          !conversation.classList.contains('active') &&
-          this.isVisibleConversation(conversation)
+          String(conversation.dataset.conversationId) === String(conversationId)
         );
       });
+      if (currentIndex === -1) return null;
+
+      const nextConversation =
+        conversations[currentIndex - 1] || conversations[currentIndex + 1];
+      if (!nextConversation?.dataset.conversationPath) return null;
+
+      return {
+        id: nextConversation.dataset.conversationId,
+        path: nextConversation.dataset.conversationPath,
+      };
     },
     isVisibleConversation(conversation) {
       const rect = conversation.getBoundingClientRect();
