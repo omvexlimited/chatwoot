@@ -20,7 +20,16 @@ const CUSTOMER_DELAY_PATTERNS = [
   /hasn'?t arrived/i,
   /has not arrived/i,
   /not received/i,
-  /still waiting/i
+  /still waiting/i,
+  /no updates?/i,
+  /no tracking updates?/i,
+  /tracking (has )?not updated/i,
+  /tracking hasn'?t updated/i,
+  /tracking isn'?t updating/i,
+  /tracking not updating/i,
+  /status (has )?not changed/i,
+  /status hasn'?t changed/i,
+  /no (new )?information/i
 ];
 
 export function detectSupportCase({ latestMessage = '', conversationText = '', shopifyContext = {} } = {}) {

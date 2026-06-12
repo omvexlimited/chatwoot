@@ -296,3 +296,42 @@ test('replaces carrier-only tracking links with the Kits Republic tracking link'
   assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
   assert.doesNotMatch(result, /royalmail\.com/);
 });
+
+test('removes duplicate Kits Republic tracking route links', () => {
+  const draft = [
+    'Hi Jack,',
+    '',
+    'You can follow the shipment here:',
+    '',
+    'https://kitsrepublic.com/apps/17TRACK?nums=GV129857971GB',
+    '',
+    'The tracking has not updated yet because the parcel is in customs clearance.',
+    '',
+    'You can follow it here:',
+    '',
+    'https://kitsrepublic.com/tracking/GV129857971GB',
+    '',
+    'Best,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'English' },
+    supportCase: { type: 'customs_pending', confidence: 'medium', reasons: [] },
+    shopifyContext: {
+      selected_order: {
+        fulfillments: [
+          {
+            tracking_numbers: ['GV129857971GB'],
+            tracking: [{ company: 'Royal Mail', number: 'GV129857971GB' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
+  assert.doesNotMatch(result, /kitsrepublic\.com\/tracking/);
+  assert.doesNotMatch(result, /You can follow it here:/);
+});

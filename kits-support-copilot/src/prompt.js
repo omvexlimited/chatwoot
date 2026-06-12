@@ -231,6 +231,8 @@ function customsPendingInstruction() {
     '6. Include "You can follow the shipment here:" or the equivalent in the customer language, followed by the Kits Republic 17TRACK URL on its own line.',
     '7. Say that once customs/pre-entry processing finishes and the parcel is handed to the local carrier, tracking will update automatically and delivery usually happens soon after local carrier handoff.',
     'Prefer this Spanish style for CTT cases: "Hola," then "Hemos revisado tu envio y actualmente se encuentra en inspeccion de aduanas." then explain "Pendiente de recepcion en CTT Express", that CTT has the details but not the physical parcel yet, World Cup customs delays, the tracking link, and the automatic update after customs release/local handoff.',
+    'Prefer this English style for no-update Royal Mail cases: "Hi," then "We have reviewed the shipment and it is currently in customs clearance. This means the parcel has not yet passed the customs check, and once that process is completed, the tracking status will update automatically." then the canonical Kits Republic tracking link.',
+    'Do not say "scanned into their network", "fully received into their network", or similar carrier-network wording. Use normal customer language: customs clearance, customs check, tracking status will update automatically.',
     'Avoid filler such as "Gracias por contactarnos", "Gracias por tu paciencia y comprension", and avoid mentioning the order number unless it is necessary to identify the case.',
     'Do not add vague reassurances, do not blame the customer, do not promise an exact delivery date, and do not use the Shopify proxy tracking URL.'
   ].join(' ');

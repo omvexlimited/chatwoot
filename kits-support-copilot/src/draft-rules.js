@@ -35,7 +35,7 @@ export function enforceDraftRequirements({ draft = '', supportCase, shopifyConte
 
 function canonicalizeTrackingLinks(text, trackingUrl) {
   return text.replace(
-    /https?:\/\/(?:www\.)?(?:17track\.net|shopify\.17track\.net|royalmail\.com|ctt\.pt|cttexpress\.com|ctt\.es|colissimo\.fr|laposte\.fr|evri\.com|hermesworld\.com|parcelsapp\.com|aftership\.com|dhl\.[a-z.]+)\/\S+|https?:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=\S+/gi,
+    /https?:\/\/(?:www\.)?(?:17track\.net|shopify\.17track\.net|royalmail\.com|ctt\.pt|cttexpress\.com|ctt\.es|colissimo\.fr|laposte\.fr|evri\.com|hermesworld\.com|parcelsapp\.com|aftership\.com|dhl\.[a-z.]+)\/\S+|https?:\/\/(?:www\.)?kitsrepublic\.com\/(?:apps\/17TRACK\?nums=|tracking\/)\S+/gi,
     trackingUrl
   );
 }

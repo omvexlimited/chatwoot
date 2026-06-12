@@ -49,6 +49,25 @@ test('detects UK Royal Mail expecting parcel as customs pending', () => {
   assert.equal(supportCase.confidence, 'high');
 });
 
+test('detects no tracking updates with Royal Mail as customs pending', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'Hi, there have been no updates on my tracking for days.',
+    conversationText: '',
+    shopifyContext: shopifyContext({
+      countryCode: 'GB',
+      carrier: 'Royal Mail',
+      trackingNumber: 'GV129857971GB',
+      inTransitAt: null,
+      displayStatus: 'CONFIRMED'
+    })
+  });
+
+  assert.equal(supportCase.type, 'customs_pending');
+  assert.equal(supportCase.confidence, 'medium');
+  assert.ok(supportCase.reasons.includes('customer_waiting_or_delay_question'));
+  assert.ok(supportCase.reasons.includes('local_handoff_carrier:Royal Mail'));
+});
+
 test('does not detect customs when fulfillment is delivered', () => {
   const supportCase = detectSupportCase({
     latestMessage: 'Where is my order?',
