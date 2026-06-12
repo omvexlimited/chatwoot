@@ -162,9 +162,11 @@ async function handleCopilotChat(req, res) {
     config,
     context: responseContext,
     pendingIssue
-  }) || (!command && pendingIssue ? runPendingTicketFeedback({
+  }) || (!command && pendingIssue ? await runPendingTicketFeedback({
     message: latestUserMessage,
-    pendingIssue
+    pendingIssue,
+    config,
+    context: responseContext
   }) : null);
 
   if (ticketResult?.handled) {
