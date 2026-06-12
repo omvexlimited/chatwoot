@@ -158,6 +158,7 @@ function normalizeOrderCandidates(candidates) {
     order: candidate.order || '-',
     date: formatContextDate(candidate.date),
     shopify_status: candidate.shopify_status || '-',
+    provider: candidate.provider || '',
     shipment_status: candidate.shipment_status || '-',
     country: formatCountry(candidate.country, candidate.country_code),
     tracking_carrier: candidate.tracking_carrier || '',

@@ -1,6 +1,17 @@
 export async function getAssignedProvider({ config, order }) {
-  if (!order) return emptyResult('no_order');
-  if (!config.krProviderDatabaseUrl) return emptyResult('not_configured');
+  const result = await getAssignedProviders({ config, orders: order ? [order] : [] });
+  return providerResultForOrder({ result, order });
+}
+
+export async function getAssignedProviders({ config, orders = [] }) {
+  const normalizedOrders = Array.isArray(orders) ? orders.filter(Boolean) : [];
+  if (!normalizedOrders.length) return batchResult('no_order');
+  if (!config.krProviderDatabaseUrl) {
+    return batchResult(
+      'not_configured',
+      'Provider lookup is not configured. Set KR_PROVIDER_DATABASE_URL to the Kits Republic orders database.'
+    );
+  }
 
   const { Client } = await import('pg');
   const client = new Client({
@@ -12,6 +23,8 @@ export async function getAssignedProvider({ config, order }) {
 
   try {
     await client.connect();
+    const shopifyIds = normalizedOrders.flatMap(shopifyOrderIdCandidates);
+    const orderNumbers = normalizedOrders.flatMap(order => orderNumberCandidates(order.name));
     const result = await client.query(
       `
       SELECT
@@ -31,34 +44,41 @@ export async function getAssignedProvider({ config, order }) {
       LEFT JOIN kits_republic_providers p ON p.id = o.provider_id
       WHERE o.store_id = $1
         AND (
-          o.shopify_order_id = $2
+          o.shopify_order_id = ANY($2::text[])
           OR o.order_number = ANY($3::text[])
         )
       ORDER BY o.shopify_created_at DESC NULLS LAST, o.id DESC
-      LIMIT 1
       `,
       [
         config.krProviderStoreId || 'kits_republic',
-        String(order.id || ''),
-        orderNumberCandidates(order.name)
+        [...new Set(shopifyIds)],
+        [...new Set(orderNumbers)]
       ]
     );
-
-    const row = result.rows[0];
-    if (!row) return emptyResult('order_not_found');
 
     return {
       available: true,
       source: 'kits_republic_orders',
-      order_id: row.order_id,
-      order_number: row.order_number || null,
-      shopify_order_id: row.shopify_order_id || null,
-      provider: formatProvider(row),
+      reason: null,
+      providers_by_order_ref: providersByOrderRef({ rows: result.rows, orders: normalizedOrders }),
       warnings: []
     };
   } finally {
     await client.end().catch(() => {});
   }
+}
+
+function providerResultForOrder({ result, order }) {
+  if (!order) return emptyResult('no_order');
+  if (!result.available) return emptyResult(result.reason, result.warnings?.[0] || null);
+
+  const providerResult = result.providers_by_order_ref?.[order.name];
+  if (providerResult) return providerResult;
+
+  return emptyResult(
+    'order_not_found',
+    `Provider lookup could not find ${order.name || 'the selected order'} in the Kits Republic orders database.`
+  );
 }
 
 export function formatProvider(row = {}) {
@@ -82,6 +102,64 @@ export function formatProvider(row = {}) {
   };
 }
 
+function providersByOrderRef({ rows = [], orders = [] }) {
+  const indexes = rowIndexes(rows);
+  return orders.reduce((acc, order) => {
+    const row = rowForOrder(order, indexes);
+    if (!row) return acc;
+
+    const provider = formatProvider(row);
+    acc[order.name] = {
+      available: Boolean(provider),
+      source: 'kits_republic_orders',
+      reason: provider ? null : 'provider_not_assigned',
+      order_id: row.order_id,
+      order_number: row.order_number || null,
+      shopify_order_id: row.shopify_order_id || null,
+      provider,
+      warnings: provider ? [] : [`Kits Republic order ${row.order_number || order.name} was found but has no provider assigned.`]
+    };
+    return acc;
+  }, {});
+}
+
+function rowIndexes(rows = []) {
+  const byShopifyId = new Map();
+  const byOrderNumber = new Map();
+
+  for (const row of rows) {
+    for (const id of shopifyOrderIdCandidates({ id: row.shopify_order_id })) {
+      if (!byShopifyId.has(id)) byShopifyId.set(id, row);
+    }
+    for (const orderNumber of orderNumberCandidates(row.order_number)) {
+      if (!byOrderNumber.has(orderNumber)) byOrderNumber.set(orderNumber, row);
+    }
+  }
+
+  return { byShopifyId, byOrderNumber };
+}
+
+function rowForOrder(order, indexes) {
+  for (const id of shopifyOrderIdCandidates(order)) {
+    const row = indexes.byShopifyId.get(id);
+    if (row) return row;
+  }
+
+  for (const orderNumber of orderNumberCandidates(order.name)) {
+    const row = indexes.byOrderNumber.get(orderNumber);
+    if (row) return row;
+  }
+
+  return null;
+}
+
+function shopifyOrderIdCandidates(order = {}) {
+  const value = String(order.id || '').trim();
+  if (!value) return [];
+  const numeric = value.match(/(\d+)$/)?.[1];
+  return [...new Set([value, numeric].filter(Boolean))];
+}
+
 function providerLabel({ name, code }) {
   if (name && code && name !== code) return `${name} · ${code}`;
   return name || code || null;
@@ -98,13 +176,23 @@ function orderNumberCandidates(value = '') {
   return [...new Set(candidates)];
 }
 
-function emptyResult(reason) {
+function batchResult(reason, warning = null) {
+  return {
+    available: false,
+    source: null,
+    reason,
+    providers_by_order_ref: {},
+    warnings: warning ? [warning] : []
+  };
+}
+
+function emptyResult(reason, warning = null) {
   return {
     available: false,
     source: null,
     reason,
     provider: null,
-    warnings: []
+    warnings: warning ? [warning] : []
   };
 }
 

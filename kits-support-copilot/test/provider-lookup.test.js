@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatProvider } from '../src/provider-lookup.js';
+import { formatProvider, getAssignedProvider, getAssignedProviders } from '../src/provider-lookup.js';
 
 test('formats assigned Kits Republic provider label from provider table fields', () => {
   const provider = formatProvider({
@@ -36,4 +36,26 @@ test('does not duplicate code when provider name already equals code', () => {
   });
 
   assert.equal(provider.label, '194939');
+});
+
+test('warns when provider database is not configured for a selected order', async () => {
+  const result = await getAssignedProvider({
+    config: {},
+    order: { name: '#2590', id: 'gid://shopify/Order/1234567890' }
+  });
+
+  assert.equal(result.available, false);
+  assert.equal(result.reason, 'not_configured');
+  assert.match(result.warnings[0], /KR_PROVIDER_DATABASE_URL/);
+});
+
+test('does not warn when there is no order for provider lookup', async () => {
+  const result = await getAssignedProviders({
+    config: {},
+    orders: []
+  });
+
+  assert.equal(result.available, false);
+  assert.equal(result.reason, 'no_order');
+  assert.deepEqual(result.warnings, []);
 });

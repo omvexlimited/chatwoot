@@ -120,6 +120,7 @@ test('builds order candidate card for multiple Shopify orders', () => {
         order: '#1111',
         date: '2026-06-01T10:00:00Z',
         shopify_status: 'FULFILLED',
+        provider: 'Mign Jin (1)',
         shipment_status: 'CONFIRMED',
         country: 'Spain',
         country_code: 'ES',
@@ -145,6 +146,7 @@ test('builds order candidate card for multiple Shopify orders', () => {
 
   assert.equal(orders.orders.length, 2);
   assert.equal(orders.orders[0].date, '01 Jun 2026');
+  assert.equal(orders.orders[0].provider, 'Mign Jin (1)');
   assert.equal(orders.orders[0].country, 'Spain / ES');
   assert.equal(orders.orders[0].shopify_admin_url, 'https://kits-republic.myshopify.com/admin/orders/1111');
   assert.equal(orders.orders[1].selected, true);

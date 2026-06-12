@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 import { loadConfig, getConfigStatus } from './config.js';
 import { fetchConversationMessages, createPrivateNote, prepareDraftReply } from './chatwoot.js';
 import { getShopifyContext } from './shopify.js';
-import { getAssignedProvider } from './provider-lookup.js';
+import { getAssignedProviders } from './provider-lookup.js';
 import { getDeliveryEstimateContext } from './delivery-estimates.js';
 import { applyAgentDraftLanguageOverride, detectLanguageFromText, inferResponseLanguage } from './language.js';
 import { detectSupportCase } from './support-case.js';
@@ -339,16 +339,19 @@ async function prepareConversationContext(body) {
     text: [latestMessage, conversationText].join('\n'),
     selectedOrderRef: body.selected_order_ref
   });
-  const providerContext = await getAssignedProvider({
+  const providerLookupContext = await getAssignedProviders({
     config,
-    order: shopifyContext.selected_order
+    orders: shopifyContext.orders
   }).catch(error => ({
     available: false,
     source: null,
     reason: 'lookup_failed',
+    providers_by_order_ref: {},
     provider: null,
     warnings: [`Provider lookup failed: ${error.message}`]
   }));
+  attachProvidersToShopifyContext(shopifyContext, providerLookupContext);
+  const providerContext = selectedProviderContext({ providerLookupContext, order: shopifyContext.selected_order });
   attachProviderToShopifyContext(shopifyContext, providerContext);
 
   const deliveryEstimateContext = await getDeliveryEstimateContext({
@@ -394,6 +397,39 @@ function attachProviderToShopifyContext(shopifyContext, providerContext) {
 
   shopifyContext.selected_order.provider = provider.label;
   shopifyContext.selected_order.assigned_provider = provider;
+}
+
+function attachProvidersToShopifyContext(shopifyContext, providerLookupContext) {
+  const providersByOrderRef = providerLookupContext?.providers_by_order_ref || {};
+  if (!shopifyContext?.orders?.length) return;
+
+  for (const order of shopifyContext.orders) {
+    const provider = providersByOrderRef[order.name]?.provider;
+    if (!provider) continue;
+    order.provider = provider.label;
+    order.assigned_provider = provider;
+  }
+}
+
+function selectedProviderContext({ providerLookupContext, order }) {
+  if (!order) return { available: false, source: null, reason: 'no_order', provider: null, warnings: [] };
+  if (!providerLookupContext?.available) {
+    return {
+      available: false,
+      source: null,
+      reason: providerLookupContext?.reason || 'lookup_failed',
+      provider: null,
+      warnings: providerLookupContext?.warnings || []
+    };
+  }
+
+  return providerLookupContext.providers_by_order_ref?.[order.name] || {
+    available: false,
+    source: providerLookupContext.source || null,
+    reason: 'order_not_found',
+    provider: null,
+    warnings: [`Provider lookup could not find ${order.name || 'the selected order'} in the Kits Republic orders database.`]
+  };
 }
 
 function contextPayload(context) {
@@ -490,6 +526,9 @@ function summarizeOrderCandidates(orders = [], selectedOrderRef = '') {
       shopify_admin_url: buildShopifyAdminOrderUrl(order),
       date: order.created_at || null,
       shopify_status: order.fulfillment_status || null,
+      provider: order.provider || order.assigned_provider?.label || null,
+      provider_code: order.assigned_provider?.code || null,
+      provider_name: order.assigned_provider?.name || null,
       shipment_status: fulfillment?.display_status || null,
       country: order.shipping_address?.country || null,
       country_code: order.shipping_address?.country_code || null,

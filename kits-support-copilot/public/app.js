@@ -847,6 +847,7 @@ function renderOrderCandidate(order) {
   meta.textContent = [
     order.date,
     order.shopify_status,
+    order.provider,
     order.country,
     formatCandidateTracking(order)
   ].filter(Boolean).join(' | ');
