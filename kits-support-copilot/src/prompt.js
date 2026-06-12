@@ -9,6 +9,7 @@ import {
 } from './language.js';
 import { buildPublicTrackingUrl, firstTrackingNumberFromShopifyContext } from './tracking-url.js';
 import { formatPromptMemories } from './memory.js';
+import { buildDeliveryTimingGuidance } from './delivery-guidance.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -41,6 +42,7 @@ export function buildPrompt({
   const supportCaseSummary = JSON.stringify(supportCase || null, null, 2);
   const customsContext = buildCustomsContext({ shopifyContext, supportCase });
   const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
+  const deliveryTimingGuidance = JSON.stringify(buildDeliveryTimingGuidance(deliveryEstimateContext), null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
   return {
@@ -92,6 +94,9 @@ export function buildPrompt({
       'Delivery estimate context:',
       deliveryEstimateSummary,
       '',
+      'Delivery timing guidance:',
+      deliveryTimingGuidance,
+      '',
       'Shopify context:',
       shopifySummary
     ].join('\n')
@@ -120,6 +125,7 @@ export function buildCopilotChatPrompt({
   const supportCaseSummary = JSON.stringify(supportCase || null, null, 2);
   const customsContext = buildCustomsContext({ shopifyContext, supportCase });
   const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
+  const deliveryTimingGuidance = JSON.stringify(buildDeliveryTimingGuidance(deliveryEstimateContext), null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
   const agentChatLanguage = inferAgentChatLanguage(normalizedChatMessages);
@@ -198,6 +204,9 @@ export function buildCopilotChatPrompt({
       'Delivery estimate context:',
       deliveryEstimateSummary,
       '',
+      'Delivery timing guidance:',
+      deliveryTimingGuidance,
+      '',
       'Shopify context:',
       shopifySummary,
       '',
@@ -260,6 +269,11 @@ function deliveryEstimateInstruction() {
     'Delivery estimate rule:',
     'Delivery estimate context is internal historical carrier performance from delivered Kits Republic orders.',
     'Use carrier-specific recent-shipment wording only when Delivery estimate context has available=true and confidence is high or medium.',
+    'Use Delivery timing guidance when usable=true. It converts raw analytics into customer-safe wording. Translate its customer_guidance into the draft language when needed.',
+    'If Delivery timing guidance tone is near_average, say the tracking usually updates around this point after dispatch and should update soon after customs/local handoff.',
+    'If Delivery timing guidance tone is over_average, say it is taking a little longer than the recent carrier average but tracking will update automatically after handoff.',
+    'If Delivery timing guidance tone is early, say it is still within the usual recent timing seen for that carrier.',
+    'Delivery timing guidance exact numbers are internal only. Do not write exact remaining days such as 0.8 days, ~0.8 days, 1.2 days, today, tomorrow, or a specific date to the customer.',
     'Never present it as a promise, deadline, guaranteed delivery date, or exact ETA.',
     'When it is available, keep wording soft and explicitly approximate; when it is unavailable, do not mention recent shipments, recent carrier average, carrier analytics, or estimated remaining days.',
     'Never combine the official shipping-policy timeframe of 7-15 days with carrier analytics language such as "based on recent shipments with Royal Mail". The 7-15 day range is a policy timeframe, not carrier analytics.',
@@ -279,6 +293,7 @@ function customsPendingInstruction() {
     '5. Say this phase is outside our control and, when relevant, customs are experiencing more volume than usual because of the World Cup, so some shipments are delayed.',
     '6. Include "You can follow the shipment here:" or the equivalent in the customer language, followed by the Kits Republic 17TRACK URL on its own line.',
     '7. Say that once customs/pre-entry processing finishes and the parcel is handed to the local carrier, tracking will update automatically and delivery usually happens soon after local carrier handoff.',
+    '8. If Delivery timing guidance is usable, add its customer-safe timing reassurance after the customs explanation and before the tracking link. Do not mention exact remaining days.',
     'Prefer this Spanish style for CTT cases: "Hola," then "Hemos revisado tu envio y actualmente se encuentra en inspeccion de aduanas." then explain "Pendiente de recepcion en CTT Express", that CTT has the details but not the physical parcel yet, World Cup customs delays, the tracking link, and the automatic update after customs release/local handoff.',
     'Prefer this English style for no-update Royal Mail cases: "Hi," then "We have reviewed the shipment and it is currently in customs clearance. This means the parcel has not yet passed the customs check, and once that process is completed, the tracking status will update automatically." then the canonical Kits Republic tracking link.',
     'Do not say "scanned into their network", "fully received into their network", or similar carrier-network wording. Use normal customer language: customs clearance, customs check, tracking status will update automatically.',

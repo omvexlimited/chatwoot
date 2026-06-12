@@ -1,4 +1,5 @@
 import { buildPublicTrackingUrl, firstTrackingNumberFromShopifyContext } from './tracking-url.js';
+import { buildDeliveryTimingGuidance } from './delivery-guidance.js';
 
 const POLICY_LINKS = {
   shipping: 'https://kitsrepublic.com/policies/shipping-policy',
@@ -60,7 +61,7 @@ function normalizeLabelUrlSpacing(text) {
 
 function normalizeSignatureSpacing(text) {
   return text.replace(
-    /(Best regards,|Kind regards,|Regards,|Un saludo,|Saludos,|Salutacions,|Cordialment,|Atentament,|Cordialement,|Viele Gruesse,|Viele Grüße,|Grazie,|Obrigado,|Obrigada,|Met vriendelijke groet,)\s*www\.kitsrepublic\.com/gi,
+    /(Best,|Best regards,|Kind regards,|Regards,|Un saludo,|Saludos,|Salutacions,|Cordialment,|Atentament,|Cordialement,|Viele Gruesse,|Viele Grüße,|Grazie,|Obrigado,|Obrigada,|Met vriendelijke groet,)\s*www\.kitsrepublic\.com/gi,
     (_, signoff) => `${signoff}\n\nwww.kitsrepublic.com`
   );
 }
@@ -122,7 +123,9 @@ function removeRedundantTrackingNumberLines(text, trackingNumber, trackingUrl) {
 }
 
 function enforceDeliveryEstimateClaims(text, deliveryEstimateContext, language) {
-  if (hasReliableDeliveryEstimate(deliveryEstimateContext)) return text;
+  const guidance = buildDeliveryTimingGuidance(deliveryEstimateContext);
+  const safeText = removeExactTimingClaims(text, guidance, language);
+  if (hasReliableDeliveryEstimate(deliveryEstimateContext)) return safeText;
 
   const neutralTimeframe = copyForLanguage(language, {
     English: 'Our usual delivery timeframe is 7-15 days from purchase, but it can vary.',
@@ -135,7 +138,7 @@ function enforceDeliveryEstimateClaims(text, deliveryEstimateContext, language) 
     Dutch: 'Onze gebruikelijke levertijd is 7-15 dagen vanaf aankoop, maar dit kan varieren.'
   });
 
-  let value = text.replace(
+  let value = safeText.replace(
     /\b(?:Based on recent shipments with|Based on recent deliveries with|Based on recent carrier data for)\s+[^.\n]+\.?/gi,
     sentence => (/\b7\s*[–-]\s*15\b/i.test(sentence) ? neutralTimeframe : '')
   );
@@ -152,6 +155,40 @@ function enforceDeliveryEstimateClaims(text, deliveryEstimateContext, language) 
 
   value = value.replace(/\bthe\s+recent\s+carrier\s+average[^.\n]*\.?/gi, '');
   return normalizeBlankLines(value);
+}
+
+function removeExactTimingClaims(text, guidance, language) {
+  let value = text.replace(
+    /\b(?:estimated\s+remaining|remaining\s+time|time\s+remaining|remaining)\s*[:\s-]*(?:about|around|approximately|approx\.?|~)?\d+(?:\.\d+)?\s*days?\b[^.\n]*\.?/gi,
+    ''
+  );
+
+  value = value.replace(
+    /\b(?:about|around|approximately|approx\.?|~)?\d+(?:\.\d+)?\s*days?\s+remaining\b[^.\n]*\.?/gi,
+    ''
+  );
+
+  value = value.replace(
+    /\b(?:Based on recent shipments with|Based on recent deliveries with|Based on recent carrier data for)\s+[^.\n]*\b\d+\.\d+\s+days?\b[^.\n]*\.?/gi,
+    () => timingGuidanceReplacement(guidance, language)
+  );
+
+  value = value.replace(
+    /\b(?:it|the shipment|tracking|delivery|the parcel|your parcel)\s+(?:should|will|is expected to|expected to)\s+(?:arrive|be delivered|update)[^.\n]*\b(?:today|tomorrow)\b[^.\n]*\.?/gi,
+    ''
+  );
+
+  value = value.replace(
+    /\b(?:arrive|be delivered|update)\s+(?:today|tomorrow)\b[^.\n]*\.?/gi,
+    ''
+  );
+
+  return normalizeBlankLines(value);
+}
+
+function timingGuidanceReplacement(guidance, language) {
+  if (!guidance?.usable || language !== 'English') return '';
+  return guidance.customer_guidance || '';
 }
 
 function hasReliableDeliveryEstimate(deliveryEstimateContext) {

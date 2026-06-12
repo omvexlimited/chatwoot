@@ -358,11 +358,42 @@ test('removes false recent-shipment estimate wording when delivery analytics are
   assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
 });
 
-test('keeps recent-shipment estimate wording when delivery analytics are reliable', () => {
+test('replaces exact recent-shipment decimal wording when delivery analytics are reliable', () => {
   const draft = [
     'Hi,',
     '',
     'Based on recent shipments with Royal Mail, delivery usually takes around 6.2 days after dispatch.',
+    'Estimated remaining: ~0.8 days.',
+    '',
+    'Best,www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'English' },
+    deliveryEstimateContext: {
+      available: true,
+      confidence: 'high',
+      carrier: 'Royal Mail',
+      avg_transit_days: 6.2,
+      days_since_fulfillment: 5.4,
+      estimated_remaining_days: 0.8
+    }
+  });
+
+  assert.match(result, /Based on our recent Royal Mail shipments, this stage usually updates around this point after dispatch/);
+  assert.doesNotMatch(result, /6\.2 days/);
+  assert.doesNotMatch(result, /0\.8 days/);
+  assert.match(result, /Best,\n\nwww\.kitsrepublic\.com$/);
+});
+
+test('cleans exact arrival promises from delivery estimate wording', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'The shipment should arrive tomorrow.',
+    'It should update today.',
+    '0.8 days remaining.',
     '',
     'Best regards,',
     'www.kitsrepublic.com'
@@ -373,13 +404,18 @@ test('keeps recent-shipment estimate wording when delivery analytics are reliabl
     responseLanguage: { language: 'English' },
     deliveryEstimateContext: {
       available: true,
-      confidence: 'high',
+      confidence: 'medium',
       carrier: 'Royal Mail',
-      avg_transit_days: 6.2
+      avg_transit_days: 6.2,
+      days_since_fulfillment: 5.4,
+      estimated_remaining_days: 0.8
     }
   });
 
-  assert.match(result, /Based on recent shipments with Royal Mail, delivery usually takes around 6\.2 days after dispatch\./);
+  assert.doesNotMatch(result, /tomorrow/i);
+  assert.doesNotMatch(result, /today/i);
+  assert.doesNotMatch(result, /0\.8 days/i);
+  assert.match(result, /Best regards,\n\nwww\.kitsrepublic\.com$/);
 });
 
 test('uses Catalan labels when the draft language is explicitly Catalan', () => {

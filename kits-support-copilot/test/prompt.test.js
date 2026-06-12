@@ -133,13 +133,61 @@ test('passes carrier delivery estimates to prompt with non-promissory rules', ()
   });
 
   assert.match(prompt.system, /Use carrier-specific recent-shipment wording only when Delivery estimate context has available=true/);
+  assert.match(prompt.system, /Use Delivery timing guidance when usable=true/);
+  assert.match(prompt.system, /exact numbers are internal only/);
   assert.match(prompt.system, /Never combine the official shipping-policy timeframe of 7-15 days with carrier analytics language/);
   assert.doesNotMatch(prompt.system, /usually takes around X days after dispatch/);
   assert.match(prompt.system, /do not say it will arrive today/);
   assert.match(prompt.user, /Delivery estimate context/);
+  assert.match(prompt.user, /Delivery timing guidance/);
+  assert.match(prompt.user, /"tone": "early"/);
+  assert.match(prompt.user, /"customer_guidance": "This is still within the usual recent timing we see for Royal Mail shipments\."/);
   assert.match(prompt.user, /"carrier": "Royal Mail"/);
   assert.match(prompt.user, /"avg_transit_days": 6.2/);
   assert.match(prompt.user, /"estimated_remaining_days": 2.7/);
+});
+
+test('passes near-average delivery timing guidance to prompt for customs cases', () => {
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Guide text',
+    conversationText: 'INCOMING Customer: Royal Mail has no update.',
+    shopifyContext: {
+      selected_order: {
+        name: '#9999',
+        fulfillments: [
+          {
+            created_at: '2026-06-07T12:00:00Z',
+            tracking_numbers: ['GV500891495GB'],
+            tracking: [{ company: 'Royal Mail', number: 'GV500891495GB' }]
+          }
+        ]
+      },
+      selection_reason: 'Matched explicit order #9999.',
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'Royal Mail has no update.',
+    supportCase: {
+      type: 'customs_pending',
+      confidence: 'medium',
+      reasons: ['tracking_present', 'local_handoff_carrier:Royal Mail']
+    },
+    deliveryEstimateContext: {
+      available: true,
+      carrier: 'Royal Mail',
+      avg_transit_days: 6.2,
+      days_since_fulfillment: 5.4,
+      estimated_remaining_days: 0.8,
+      confidence: 'medium'
+    },
+    chatMessages: [{ role: 'user', content: 'Generate a reply' }]
+  });
+
+  assert.match(prompt.user, /"tone": "near_average"/);
+  assert.match(prompt.user, /updates around this point after dispatch/);
+  assert.match(prompt.user, /tracking should update soon/);
+  assert.match(prompt.system, /add its customer-safe timing reassurance after the customs explanation/);
+  assert.match(prompt.system, /Do not mention exact remaining days/);
 });
 
 test('builds CTT customs context with pre-handoff explanation', () => {
