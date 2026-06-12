@@ -40,8 +40,50 @@ const FACT_DEFINITIONS = [
     label: 'Agent confirmed the carrier will deliver soon.',
     matches: text => {
       return /(?:mandar|enviar|entregar|deliver|send|arrive).{0,40}(?:pronto|soon|shortly)/i.test(text)
-        || /(?:pronto|soon|shortly).{0,40}(?:entrega|deliver|arrive)/i.test(text);
+        || /(?:pronto|soon|shortly|en breve).{0,40}(?:entrega|deliver|arrive)/i.test(text)
+        || /(?:list[oa]|ready).{0,40}(?:entreg|deliver)/i.test(text)
+        || /(?:entregad|delivered).{0,40}(?:en breve|soon|shortly|pronto)/i.test(text);
     }
+  },
+  {
+    type: 'parcel_ready_for_delivery',
+    label: 'Agent confirmed the parcel is ready for delivery soon.',
+    matches: text => {
+      return /(?:list[oa]|ready).{0,50}(?:entreg|delivery)/i.test(text)
+        || /(?:ready for delivery|ready to be delivered)/i.test(text);
+    }
+  },
+  {
+    type: 'customer_email_was_missing',
+    label: 'Agent confirmed the order/customer email was missing before.',
+    matches: text => {
+      return has(text, 'email')
+        && hasAny(text, ['no habia sido introducido', 'no estaba introducido', 'no estaba anadido', 'no estaba añadido', 'was missing', 'was not added', 'wasn\'t added']);
+    }
+  },
+  {
+    type: 'customer_email_added',
+    label: 'Agent confirmed the customer email has now been added.',
+    matches: text => {
+      return has(text, 'email')
+        && hasAny(text, ['ya se le hemos anadido', 'ya se lo hemos anadido', 'ya lo hemos anadido', 'ya esta anadido', 'ya se le hemos añadido', 'ya se lo hemos añadido', 'ya lo hemos añadido', 'ya esta añadido', 'has now been added', 'email added']);
+    }
+  },
+  {
+    type: 'future_updates_enabled',
+    label: 'Agent confirmed future updates will be sent to the customer email.',
+    matches: text => {
+      return hasAny(text, ['proximas actualizaciones', 'próximas actualizaciones', 'future updates', 'next updates'])
+        && hasAny(text, ['recibira', 'recibirá', 'will receive', 'sent there', 'sent to that email']);
+    }
+  },
+  {
+    type: 'order_access_link_provided',
+    label: 'Agent provided a customer order access link.',
+    matches: text => /https?:\/\/account\.kitsrepublic\.com\/orders\/\S+/i.test(text),
+    details: text => ({
+      url: text.match(/https?:\/\/account\.kitsrepublic\.com\/orders\/\S+/i)?.[0] || ''
+    })
   },
   {
     type: 'replacement_processed',
@@ -90,7 +132,9 @@ export function extractAgentConfirmedFacts(chatMessages = []) {
         type: definition.type,
         confidence: 'confirmed_by_agent',
         source: 'agent_chat',
-        summary: definition.label
+        summary: definition.label,
+        source_excerpt: sourceExcerpt(original),
+        ...(definition.details ? definition.details(original) : {})
       });
     }
   }
@@ -109,6 +153,12 @@ function normalizeText(value = '') {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function sourceExcerpt(value = '') {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  if (normalized.length <= 240) return normalized;
+  return `${normalized.slice(0, 237)}...`;
 }
 
 function has(text, needle) {

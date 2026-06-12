@@ -440,7 +440,7 @@ function normalizeAssistantMessage({ assistantMessage = '', agentConfirmedFacts 
   if (!agentConfirmedFacts.length) return message;
 
   const isRefusalOrToneLecture =
-    /\b(abusive language|can't follow|cannot follow|can't state|cannot state|verified Shopify|Shopify tracking only supports|source of truth)\b/i.test(message);
+    /\b(abusive language|can't follow|cannot follow|can't state|cannot state|should avoid saying|avoid saying|one note:|verified Shopify|Shopify already shows|Shopify tracking only supports|Shopify only supports|source of truth)\b/i.test(message);
 
   if (!isRefusalOrToneLecture) return message;
 

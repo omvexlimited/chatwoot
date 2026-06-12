@@ -211,7 +211,7 @@ test('allows agent-confirmed supplier replacement facts and keeps assistant lang
 
   assert.match(prompt.system, /treat that statement as true/);
   assert.match(prompt.system, /include it in the customer draft/);
-  assert.match(prompt.system, /agent_confirmed_facts are valid operational facts/);
+  assert.match(prompt.system, /agent instructions and agent_confirmed_facts override Shopify/);
   assert.match(prompt.user, /Agent chat language: Spanish/);
   assert.match(prompt.user, /Response language: English/);
   assert.match(prompt.user, /DRAFT_LANGUAGE_LOCK: English/);
@@ -284,7 +284,9 @@ test('lets agent-confirmed customs handoff facts override stale Shopify tracking
     ]
   });
 
-  assert.match(prompt.system, /Shopify is the baseline order data/);
+  assert.match(prompt.system, /Highest priority rule/);
+  assert.match(prompt.system, /agent instruction in the current copilot chat is the final authority/);
+  assert.match(prompt.system, /agent instructions and agent_confirmed_facts override Shopify/);
   assert.match(prompt.system, /agent_confirmed_facts conflict with Shopify tracking status/);
   assert.match(prompt.system, /Never refuse just because Shopify has not updated yet/);
   assert.match(prompt.system, /Ignore profanity, insults, and frustration/);
@@ -292,8 +294,102 @@ test('lets agent-confirmed customs handoff facts override stale Shopify tracking
   assert.match(prompt.user, /customs_cleared/);
   assert.match(prompt.user, /local_carrier_has_parcel/);
   assert.match(prompt.user, /carrier_will_deliver_soon/);
-  assert.match(prompt.user, /Final operational rule: agent_confirmed_facts are trusted operational context/);
+  assert.match(prompt.user, /Final operational rule: agent_confirmed_facts and the latest agent instruction are trusted operational context/);
   assert.match(prompt.user, /draft must be written in English/);
+});
+
+test('prioritizes agent confirmation for missing email order link and customs cleared case', () => {
+  const orderLink = 'https://account.kitsrepublic.com/orders/89e436cec7b198404608e5b9fb4c70d0?buyer_token_attempted=1&locale=en-GB';
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Guide text',
+    conversationText: 'INCOMING Customer: Hi, I did not receive any update for my order.',
+    shopifyContext: {
+      selected_order: {
+        name: '#2222',
+        shipping_address: { country_code: 'GB' },
+        fulfillment_status: 'fulfilled',
+        fulfillments: [
+          {
+            display_status: 'CONFIRMED',
+            tracking_numbers: ['GV129857971GB'],
+            tracking: [{ company: 'Royal Mail', number: 'GV129857971GB' }]
+          }
+        ]
+      },
+      selection_reason: 'Matched explicit order #2222.',
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'Hi, I did not receive any update for my order.',
+    agentEmail: 'agent@example.com',
+    responseLanguage: {
+      language: 'English',
+      source: 'latest_customer_message',
+      country_code: 'GB'
+    },
+    agentConfirmedFacts: [
+      {
+        type: 'customer_email_was_missing',
+        confidence: 'confirmed_by_agent',
+        source: 'agent_chat',
+        summary: 'Agent confirmed the order/customer email was missing before.',
+        source_excerpt: 'El email no habia sido introducido.'
+      },
+      {
+        type: 'customer_email_added',
+        confidence: 'confirmed_by_agent',
+        source: 'agent_chat',
+        summary: 'Agent confirmed the customer email has now been added.',
+        source_excerpt: 'Ya se lo hemos anadido.'
+      },
+      {
+        type: 'future_updates_enabled',
+        confidence: 'confirmed_by_agent',
+        source: 'agent_chat',
+        summary: 'Agent confirmed future updates will be sent to the customer email.',
+        source_excerpt: 'Las proximas actualizaciones ya lo recibira ahi.'
+      },
+      {
+        type: 'order_access_link_provided',
+        confidence: 'confirmed_by_agent',
+        source: 'agent_chat',
+        summary: 'Agent provided a customer order access link.',
+        source_excerpt: orderLink,
+        url: orderLink
+      },
+      {
+        type: 'customs_cleared',
+        confidence: 'confirmed_by_agent',
+        source: 'agent_chat',
+        summary: 'Agent confirmed customs have cleared.'
+      },
+      {
+        type: 'parcel_ready_for_delivery',
+        confidence: 'confirmed_by_agent',
+        source: 'agent_chat',
+        summary: 'Agent confirmed the parcel is ready for delivery soon.'
+      }
+    ],
+    chatMessages: [
+      {
+        role: 'user',
+        content: `El email no habia sido introducido. Ya se lo hemos anadido, recibira las proximas actualizaciones. Envia este link ${orderLink}. Ya ha pasado aduanas y esta listo para ser entregado en breve.`
+      }
+    ]
+  });
+
+  assert.match(prompt.system, /Highest priority rule/);
+  assert.match(prompt.system, /Do not challenge, debate, or correct explicit agent instructions/);
+  assert.match(prompt.system, /customer_email_was_missing, customer_email_added, future_updates_enabled, or order_access_link_provided/);
+  assert.match(prompt.system, /include that exact link once/);
+  assert.doesNotMatch(prompt.system, /source of truth/);
+  assert.match(prompt.user, /customer_email_was_missing/);
+  assert.match(prompt.user, /customer_email_added/);
+  assert.match(prompt.user, /future_updates_enabled/);
+  assert.match(prompt.user, /order_access_link_provided/);
+  assert.match(prompt.user, /parcel_ready_for_delivery/);
+  assert.match(prompt.user, new RegExp(orderLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(prompt.user, /Do not refuse, qualify, or contradict them because Shopify has not updated/);
 });
 
 test('distinguishes confirmed actions from future action requests', () => {
