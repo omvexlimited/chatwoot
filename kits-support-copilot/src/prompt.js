@@ -243,9 +243,10 @@ function deliveryEstimateInstruction() {
   return [
     'Delivery estimate rule:',
     'Delivery estimate context is internal historical carrier performance from delivered Kits Republic orders.',
-    'Use it only when available is true and confidence is high or medium.',
+    'Use carrier-specific recent-shipment wording only when Delivery estimate context has available=true and confidence is high or medium.',
     'Never present it as a promise, deadline, guaranteed delivery date, or exact ETA.',
-    'Use soft wording such as "usually takes around X days after dispatch" or "based on recent shipments with this carrier".',
+    'When it is available, keep wording soft and explicitly approximate; when it is unavailable, do not mention recent shipments, recent carrier average, carrier analytics, or estimated remaining days.',
+    'Never combine the official shipping-policy timeframe of 7-15 days with carrier analytics language such as "based on recent shipments with Royal Mail". The 7-15 day range is a policy timeframe, not carrier analytics.',
     'If estimated_remaining_days is 0 because the shipment is over the recent average, say it is taking longer than the recent carrier average and tracking should update automatically; do not say it will arrive today.',
     'If Delivery estimate context is null, unavailable, low confidence, insufficient_sample, no_carrier_analytics, or missing fulfillment date, do not mention carrier-specific average transit days.',
     'Delivery estimate context must never override actual delivered status, tracking status, customs_pending instructions, or agent_confirmed_facts.'

@@ -6,7 +6,13 @@ const POLICY_LINKS = {
   sizeGuide: 'https://kitsrepublic.com/pages/size-guide'
 };
 
-export function enforceDraftRequirements({ draft = '', supportCase, shopifyContext = {}, responseLanguage } = {}) {
+export function enforceDraftRequirements({
+  draft = '',
+  supportCase,
+  shopifyContext = {},
+  responseLanguage,
+  deliveryEstimateContext
+} = {}) {
   const text = String(draft || '').trim();
   if (!text) return String(draft || '');
 
@@ -29,6 +35,7 @@ export function enforceDraftRequirements({ draft = '', supportCase, shopifyConte
     normalizedText = removeRedundantTrackingNumberLines(normalizedText, trackingNumber, trackingUrl);
   }
 
+  normalizedText = enforceDeliveryEstimateClaims(normalizedText, deliveryEstimateContext, language);
   normalizedText = applyRequiredPolicyLinks(normalizedText, language);
   return normalizeDraftFormatting(normalizedText);
 }
@@ -112,6 +119,42 @@ function removeRedundantTrackingNumberLines(text, trackingNumber, trackingUrl) {
   );
 
   return normalizeBlankLines(text.split('\n').filter(line => !pattern.test(line.trim())).join('\n'));
+}
+
+function enforceDeliveryEstimateClaims(text, deliveryEstimateContext, language) {
+  if (hasReliableDeliveryEstimate(deliveryEstimateContext)) return text;
+
+  const neutralTimeframe = copyForLanguage(language, {
+    English: 'Our usual delivery timeframe is 7-15 days from purchase, but it can vary.',
+    Spanish: 'Nuestro plazo habitual de entrega es de 7-15 días desde la compra, aunque puede variar.',
+    French: 'Notre délai de livraison habituel est de 7 à 15 jours à partir de l achat, mais il peut varier.',
+    German: 'Unsere übliche Lieferzeit beträgt 7-15 Tage ab Kaufdatum, kann aber variieren.',
+    Italian: 'Il nostro tempo di consegna abituale è di 7-15 giorni dall acquisto, ma può variare.',
+    Portuguese: 'O nosso prazo habitual de entrega é de 7-15 dias a partir da compra, mas pode variar.',
+    Dutch: 'Onze gebruikelijke levertijd is 7-15 dagen vanaf aankoop, maar dit kan varieren.'
+  });
+
+  let value = text.replace(
+    /\b(?:Based on recent shipments with|Based on recent deliveries with|Based on recent carrier data for)\s+[^.\n]+\.?/gi,
+    sentence => (/\b7\s*[–-]\s*15\b/i.test(sentence) ? neutralTimeframe : '')
+  );
+
+  value = value.replace(
+    /\b(?:Seg[uú]n|Basado en|Basandonos en|Basándonos en)\s+(?:env[ií]os|entregas)\s+recientes[^.\n]*\b7\s*[–-]\s*15\s+d[ií]as[^.\n]*\.?/gi,
+    neutralTimeframe
+  );
+
+  value = value.replace(
+    /\b(?:this shipment|it|the shipment|delivery|shipping)\s+is\s+taking\s+longer\s+than\s+the\s+recent\s+carrier\s+average[^.\n]*\.?/gi,
+    ''
+  );
+
+  value = value.replace(/\bthe\s+recent\s+carrier\s+average[^.\n]*\.?/gi, '');
+  return normalizeBlankLines(value);
+}
+
+function hasReliableDeliveryEstimate(deliveryEstimateContext) {
+  return deliveryEstimateContext?.available === true && ['high', 'medium'].includes(deliveryEstimateContext?.confidence);
 }
 
 function escapeRegExp(value = '') {

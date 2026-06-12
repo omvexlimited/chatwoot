@@ -335,3 +335,49 @@ test('removes duplicate Kits Republic tracking route links', () => {
   assert.doesNotMatch(result, /kitsrepublic\.com\/tracking/);
   assert.doesNotMatch(result, /You can follow it here:/);
 });
+
+test('removes false recent-shipment estimate wording when delivery analytics are unavailable', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'Based on recent shipments with Royal Mail, this stage usually takes around 7-15 days after dispatch, but it can vary.',
+    '',
+    'Best regards,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'English' },
+    deliveryEstimateContext: { available: false, reason: 'missing_database_url' }
+  });
+
+  assert.doesNotMatch(result, /Based on recent shipments/i);
+  assert.doesNotMatch(result, /Royal Mail, this stage usually takes around 7-15 days after dispatch/i);
+  assert.match(result, /Our usual delivery timeframe is 7-15 days from purchase, but it can vary\./);
+  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+});
+
+test('keeps recent-shipment estimate wording when delivery analytics are reliable', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'Based on recent shipments with Royal Mail, delivery usually takes around 6.2 days after dispatch.',
+    '',
+    'Best regards,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'English' },
+    deliveryEstimateContext: {
+      available: true,
+      confidence: 'high',
+      carrier: 'Royal Mail',
+      avg_transit_days: 6.2
+    }
+  });
+
+  assert.match(result, /Based on recent shipments with Royal Mail, delivery usually takes around 6\.2 days after dispatch\./);
+});

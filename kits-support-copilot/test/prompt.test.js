@@ -132,8 +132,9 @@ test('passes carrier delivery estimates to prompt with non-promissory rules', ()
     chatMessages: [{ role: 'user', content: 'Tell them when it usually arrives.' }]
   });
 
-  assert.match(prompt.system, /Use it only when available is true and confidence is high or medium/);
-  assert.match(prompt.system, /usually takes around X days after dispatch/);
+  assert.match(prompt.system, /Use carrier-specific recent-shipment wording only when Delivery estimate context has available=true/);
+  assert.match(prompt.system, /Never combine the official shipping-policy timeframe of 7-15 days with carrier analytics language/);
+  assert.doesNotMatch(prompt.system, /usually takes around X days after dispatch/);
   assert.match(prompt.system, /do not say it will arrive today/);
   assert.match(prompt.user, /Delivery estimate context/);
   assert.match(prompt.user, /"carrier": "Royal Mail"/);
