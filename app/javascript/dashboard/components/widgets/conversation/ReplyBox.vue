@@ -134,6 +134,7 @@ export default {
       showArticleSearchPopover: false,
       hasRecordedAudio: false,
       copilotAcceptedMessages: {},
+      lastKrCopilotInsertedMessage: '',
     };
   },
   computed: {
@@ -312,6 +313,16 @@ export default {
         : '(↵)';
       return `${sendMessageText} ${keyLabel}`;
     },
+    sendAndResolveButtonLabel() {
+      return this.$t('CONVERSATION.REPLYBOX.SEND_AND_RESOLVE');
+    },
+    showSendAndResolveButton() {
+      return (
+        !this.isOnPrivateNote &&
+        this.currentChat.status === wootConstants.STATUS_TYPE.OPEN &&
+        !this.isReplyButtonDisabled
+      );
+    },
     replyBoxClass() {
       return {
         'is-private': this.isPrivate,
@@ -483,6 +494,7 @@ export default {
     },
     conversationIdByRoute(conversationId, oldConversationId) {
       if (conversationId !== oldConversationId) {
+        this.lastKrCopilotInsertedMessage = '';
         this.setToDraft(oldConversationId, this.replyType);
         this.getFromDraft();
         this.resetRecorderAndClearAttachments();
@@ -524,6 +536,10 @@ export default {
       this.onNewConversationModalActive
     );
     emitter.on(BUS_EVENTS.INSERT_INTO_NORMAL_EDITOR, this.addIntoEditor);
+    emitter.on(
+      BUS_EVENTS.REPLACE_REPLY_EDITOR_CONTENT,
+      this.replaceReplyEditorContent
+    );
     emitter.on(CMD_AI_ASSIST, this.executeCopilotAction);
   },
   unmounted() {
@@ -531,6 +547,10 @@ export default {
     document.removeEventListener('keydown', this.handleKeyEvents);
     emitter.off(BUS_EVENTS.TOGGLE_REPLY_TO_MESSAGE, this.onReplyToMessage);
     emitter.off(BUS_EVENTS.INSERT_INTO_NORMAL_EDITOR, this.addIntoEditor);
+    emitter.off(
+      BUS_EVENTS.REPLACE_REPLY_EDITOR_CONTENT,
+      this.replaceReplyEditorContent
+    );
     emitter.off(
       BUS_EVENTS.NEW_CONVERSATION_MODAL,
       this.onNewConversationModalActive
@@ -764,12 +784,13 @@ export default {
     hideContentTemplatesModal() {
       this.showContentTemplatesModal = false;
     },
-    confirmOnSendReply() {
+    async confirmOnSendReply({ resolveAfterSend = false } = {}) {
       if (this.isReplyButtonDisabled) {
         return;
       }
       if (!this.showMentions) {
         const copilotAcceptedMessage = this.getCopilotAcceptedMessage();
+        const conversationId = this.currentChat.id;
         const isOnWhatsApp =
           this.isATwilioWhatsAppChannel ||
           this.isAWhatsAppCloudChannel ||
@@ -780,18 +801,24 @@ export default {
         // To handle both cases, text and attachments are always sent as separate messages.
         const isOnInstagram = this.isAnInstagramChannel;
         const isOnTiktok = this.isATiktokChannel;
+        let sendPromise;
         if ((isOnWhatsApp || isOnInstagram || isOnTiktok) && !this.isPrivate) {
-          this.sendMessageAsMultipleMessages(
+          sendPromise = this.sendMessageAsMultipleMessages(
             this.message,
             copilotAcceptedMessage
           );
         } else {
           const messagePayload = this.getMessagePayload(this.message);
-          this.sendMessage(
+          sendPromise = this.sendMessage(
             messagePayload,
             this.message,
             copilotAcceptedMessage
           );
+        }
+
+        if (resolveAfterSend) {
+          const wasSent = await sendPromise;
+          if (!wasSent) return;
         }
 
         if (!this.isPrivate) {
@@ -800,17 +827,26 @@ export default {
 
         this.clearMessage();
         this.hideEmojiPicker();
+
+        if (resolveAfterSend) {
+          await this.resolveAndOpenTopVisibleConversation(conversationId);
+        }
       }
     },
-    sendMessageAsMultipleMessages(message, copilotAcceptedMessage = '') {
+    async sendMessageAsMultipleMessages(message, copilotAcceptedMessage = '') {
       const messages = this.getMultipleMessagesPayload(message);
-      messages.forEach(messagePayload => {
-        this.sendMessage(
-          messagePayload,
-          messagePayload.message || '',
-          copilotAcceptedMessage
-        );
-      });
+      if (!messages.length) return false;
+
+      const results = await Promise.all(
+        messages.map(messagePayload =>
+          this.sendMessage(
+            messagePayload,
+            messagePayload.message || '',
+            copilotAcceptedMessage
+          )
+        )
+      );
+      return results.every(Boolean);
     },
     sendMessageAnalyticsData(
       isPrivate,
@@ -858,7 +894,8 @@ export default {
             hasReplyTo: !!this.inReplyTo?.id,
           });
     },
-    async onSendReply() {
+    async onSendReply(options = {}) {
+      const resolveAfterSend = options?.resolveAfterSend === true;
       const undefinedVariables = getUndefinedVariablesInMessage({
         message: this.message,
         variables: this.messageVariables,
@@ -876,11 +913,14 @@ export default {
 
         const ok = await this.$refs.confirmDialog.showConfirmation();
         if (ok) {
-          this.confirmOnSendReply();
+          await this.confirmOnSendReply({ resolveAfterSend });
         }
       } else {
-        this.confirmOnSendReply();
+        await this.confirmOnSendReply({ resolveAfterSend });
       }
+    },
+    async onSendAndResolveReply() {
+      await this.onSendReply({ resolveAfterSend: true });
     },
     async sendMessage(
       messagePayload,
@@ -899,11 +939,58 @@ export default {
           editorMessage,
           copilotAcceptedMessage,
         });
+        return true;
       } catch (error) {
         const errorMessage =
           error?.response?.data?.error || this.$t('CONVERSATION.MESSAGE_ERROR');
         useAlert(errorMessage);
+        return false;
       }
+    },
+    async resolveAndOpenTopVisibleConversation(conversationId) {
+      const activeConversationElement = document.querySelector(
+        'div.conversations-list div.conversation.active'
+      );
+
+      await this.$store.dispatch('toggleStatus', {
+        conversationId,
+        status: wootConstants.STATUS_TYPE.RESOLVED,
+      });
+      await this.$nextTick();
+      await new Promise(resolve => requestAnimationFrame(resolve));
+
+      const nextConversation = this.findTopVisibleConversation(
+        activeConversationElement
+      );
+
+      if (nextConversation) {
+        nextConversation.click();
+      } else {
+        this.$store.dispatch('clearSelectedState');
+      }
+    },
+    findTopVisibleConversation(activeConversationElement) {
+      const conversations = [
+        ...document.querySelectorAll('div.conversations-list div.conversation'),
+      ];
+
+      return conversations.find(conversation => {
+        return (
+          conversation !== activeConversationElement &&
+          !conversation.classList.contains('active') &&
+          this.isVisibleConversation(conversation)
+        );
+      });
+    },
+    isVisibleConversation(conversation) {
+      const rect = conversation.getBoundingClientRect();
+      const style = window.getComputedStyle(conversation);
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden'
+      );
     },
     async onSendWhatsAppReply(messagePayload) {
       this.sendMessage({
@@ -940,6 +1027,68 @@ export default {
     addIntoEditor(content) {
       this.updateEditorSelectionWith = content;
       this.onFocus();
+    },
+    replaceReplyEditorContent(payload) {
+      const isPayloadObject = payload && typeof payload === 'object';
+      const content = isPayloadObject ? payload.content : payload;
+      const draft = trimContent(String(content || ''), this.maxLength);
+      const finish = result => payload?.onResult?.(result);
+
+      if (!draft) {
+        finish({ ok: false, error: 'Draft is empty.' });
+        return;
+      }
+
+      if (!this.isPayloadForCurrentConversation(payload)) {
+        finish({
+          ok: false,
+          error: 'Conversation changed before the reply could be inserted.',
+        });
+        return;
+      }
+
+      if (
+        isPayloadObject &&
+        payload.policy === 'auto' &&
+        !this.canAutoReplaceReplyEditor()
+      ) {
+        finish({
+          ok: false,
+          error:
+            'Composer was edited manually, so KR Copilot did not overwrite it.',
+        });
+        return;
+      }
+
+      if (this.replyType !== REPLY_EDITOR_MODES.REPLY) {
+        this.setReplyMode(REPLY_EDITOR_MODES.REPLY);
+      }
+
+      this.$nextTick(() => {
+        this.message = draft;
+        this.lastKrCopilotInsertedMessage = draft;
+        this.setCopilotAcceptedMessage(draft, REPLY_EDITOR_MODES.REPLY);
+        this.saveDraft(this.conversationIdByRoute, REPLY_EDITOR_MODES.REPLY);
+        this.$nextTick(() => {
+          this.messageEditor?.focusEditorInputField('end');
+          finish({ ok: true });
+        });
+      });
+    },
+    isPayloadForCurrentConversation(payload) {
+      const conversationId = payload?.conversationId;
+      if (!conversationId) return true;
+      return [this.currentChat?.id, this.conversationIdByRoute]
+        .filter(Boolean)
+        .some(id => String(id) === String(conversationId));
+    },
+    canAutoReplaceReplyEditor() {
+      if (!this.hasMeaningfulEditorContent) return true;
+
+      return (
+        trimContent(this.message || '') ===
+        trimContent(this.lastKrCopilotInsertedMessage || '')
+      );
     },
     executeCopilotAction(action, data) {
       this.copilot.execute(action, data);
@@ -1411,10 +1560,13 @@ export default {
         :is-editor-disabled="isEditorDisabled"
         :on-file-upload="onFileUpload"
         :on-send="onSendReply"
+        :on-send-and-resolve="onSendAndResolveReply"
         :conversation-type="conversationType"
         :recording-audio-duration-text="recordingAudioDurationText"
         :recording-audio-state="recordingAudioState"
+        :send-and-resolve-button-text="sendAndResolveButtonLabel"
         :send-button-text="replyButtonLabel"
+        :show-send-and-resolve="showSendAndResolveButton"
         :show-audio-recorder="showAudioRecorder"
         :show-emoji-picker="showEmojiPicker"
         :show-file-upload="showFileUpload"

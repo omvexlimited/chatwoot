@@ -25,7 +25,15 @@ export default {
       type: Function,
       default: () => {},
     },
+    onSendAndResolve: {
+      type: Function,
+      default: () => {},
+    },
     sendButtonText: {
+      type: String,
+      default: '',
+    },
+    sendAndResolveButtonText: {
       type: String,
       default: '',
     },
@@ -73,6 +81,10 @@ export default {
       default: '',
     },
     isSendDisabled: {
+      type: Boolean,
+      default: false,
+    },
+    showSendAndResolve: {
       type: Boolean,
       default: false,
     },
@@ -398,6 +410,16 @@ export default {
     </div>
     <div class="right-wrap">
       <NextButton
+        v-if="showSendAndResolve"
+        :label="sendAndResolveButtonText"
+        type="button"
+        sm
+        color="slate"
+        :disabled="isSendDisabled"
+        class="flex-shrink-0"
+        @click="onSendAndResolve"
+      />
+      <NextButton
         :label="sendButtonText"
         type="submit"
         sm
@@ -416,7 +438,7 @@ export default {
 }
 
 .right-wrap {
-  @apply flex;
+  @apply flex gap-2;
 }
 
 :deep(.file-uploads) {

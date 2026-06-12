@@ -1,5 +1,7 @@
 <script>
 import LoadingState from 'dashboard/components/widgets/LoadingState.vue';
+import { BUS_EVENTS } from 'shared/constants/busEvents';
+import { emitter } from 'shared/helpers/mitt';
 
 export default {
   components: {
@@ -21,6 +23,10 @@ export default {
     position: {
       type: Number,
       required: true,
+    },
+    mode: {
+      type: String,
+      default: 'tab',
     },
   },
   data() {
@@ -46,10 +52,21 @@ export default {
     },
   },
   watch: {
-    isVisible() {
-      if (this.isVisible) {
+    isVisible: {
+      immediate: true,
+      handler() {
+        if (!this.isVisible) return;
         this.hasOpenedAtleastOnce = true;
-      }
+        this.postContextToFrames();
+      },
+    },
+    dashboardAppContext: {
+      deep: true,
+      handler() {
+        if (this.isVisible && this.hasOpenedAtleastOnce) {
+          this.postContextToFrames();
+        }
+      },
     },
   },
   mounted() {
@@ -63,19 +80,121 @@ export default {
       if (!this.isVisible) return;
       if (event.data === 'chatwoot-dashboard-app:fetch-info') {
         this.onIframeLoad(0);
+        return;
       }
+
+      const message = this.parseDashboardAppMessage(event.data);
+      if (message?.event !== 'kr-copilot:insert-reply') return;
+
+      const trustedFrame = this.findTrustedFrame(event);
+      if (!trustedFrame) return;
+
+      const draft = String(message.data?.draft || '').trim();
+      const requestId = message.data?.requestId;
+      const conversationId = message.data?.conversation_id;
+      if (!this.isCurrentConversation(conversationId)) {
+        this.postInsertReplyResult(event, {
+          ok: false,
+          requestId,
+          error: 'Conversation changed before the reply could be inserted.',
+        });
+        return;
+      }
+      if (!draft) {
+        this.postInsertReplyResult(event, { ok: false, requestId });
+        return;
+      }
+
+      emitter.emit(BUS_EVENTS.REPLACE_REPLY_EDITOR_CONTENT, {
+        content: draft,
+        conversationId,
+        policy: message.data?.policy || 'manual',
+        requestId,
+        onResult: result => {
+          this.postInsertReplyResult(event, { requestId, ...result });
+        },
+      });
     },
     getFrameId(index) {
       return `dashboard-app--frame-${this.position}-${index}`;
+    },
+    parseDashboardAppMessage(data) {
+      if (typeof data === 'object') return data;
+      try {
+        return JSON.parse(data);
+      } catch {
+        return null;
+      }
+    },
+    findTrustedFrame(event) {
+      return this.config.find((configItem, index) => {
+        if (configItem.type !== 'frame' || !configItem.url) return false;
+
+        const frameElement = document.getElementById(this.getFrameId(index));
+        if (frameElement?.contentWindow !== event.source) return false;
+
+        try {
+          const expectedOrigin = new URL(
+            configItem.url,
+            window.location.origin
+          ).origin;
+          return expectedOrigin === event.origin;
+        } catch {
+          return false;
+        }
+      });
+    },
+    postInsertReplyResult(event, result) {
+      const targetOrigin =
+        event.origin && event.origin !== 'null' ? event.origin : '*';
+      event.source?.postMessage(
+        JSON.stringify({
+          event: 'kr-copilot:insert-reply-result',
+          data: result,
+        }),
+        targetOrigin
+      );
     },
     onIframeLoad(index) {
       // A possible alternative is to use ref instead of document.getElementById
       // However, when ref is used together with v-for, the ref you get will be
       // an array containing the child components mirroring the data source.
       const frameElement = document.getElementById(this.getFrameId(index));
+      this.postContextToFrame(frameElement);
+      this.iframeLoading = false;
+    },
+    postContextToFrames() {
+      this.$nextTick(() => {
+        this.config.forEach((configItem, index) => {
+          if (configItem.type !== 'frame' || !configItem.url) return;
+          const frameElement = document.getElementById(this.getFrameId(index));
+          this.postContextToFrame(frameElement);
+        });
+      });
+    },
+    postContextToFrame(frameElement) {
+      if (!frameElement?.contentWindow) return;
       const eventData = { event: 'appContext', data: this.dashboardAppContext };
       frameElement.contentWindow.postMessage(JSON.stringify(eventData), '*');
-      this.iframeLoading = false;
+    },
+    isCurrentConversation(conversationId) {
+      if (!conversationId) return true;
+      const currentIds = [
+        this.currentChat?.id,
+        this.currentChat?.display_id,
+      ].filter(Boolean);
+      return currentIds.some(id => String(id) === String(conversationId));
+    },
+    frameUrl(configItem) {
+      if (!configItem.url || this.mode !== 'sidebar') return configItem.url;
+
+      try {
+        const url = new URL(configItem.url, window.location.origin);
+        url.searchParams.set('layout', 'sidebar');
+        return url.toString();
+      } catch {
+        return configItem.url;
+      }
     },
   },
 };
@@ -83,7 +202,11 @@ export default {
 
 <!-- eslint-disable-next-line vue/no-root-v-if -->
 <template>
-  <div v-if="hasOpenedAtleastOnce" class="dashboard-app--container">
+  <div
+    v-if="hasOpenedAtleastOnce"
+    class="dashboard-app--container"
+    :class="{ 'dashboard-app--container-sidebar': mode === 'sidebar' }"
+  >
     <div
       v-for="(configItem, index) in config"
       :key="index"
@@ -97,7 +220,8 @@ export default {
       <iframe
         v-if="configItem.type === 'frame' && configItem.url"
         :id="getFrameId(index)"
-        :src="configItem.url"
+        :src="frameUrl(configItem)"
+        allow="clipboard-write"
         @load="() => onIframeLoad(index)"
       />
     </div>
@@ -121,5 +245,13 @@ export default {
   justify-content: center;
   height: 100%;
   width: 100%;
+}
+
+.dashboard-app--container-sidebar {
+  flex: 0 0 380px;
+  min-width: 320px;
+  max-width: 420px;
+  width: 380px;
+  background: rgb(var(--color-surface-1));
 }
 </style>

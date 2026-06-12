@@ -39,6 +39,14 @@ export default {
       currentChat: 'getSelectedChat',
       dashboardApps: 'dashboardApps/getRecords',
     }),
+    regularDashboardApps() {
+      return this.dashboardApps.filter(
+        dashboardApp => !this.isKrCopilotDashboardApp(dashboardApp)
+      );
+    },
+    krCopilotDashboardApp() {
+      return this.dashboardApps.find(this.isKrCopilotDashboardApp);
+    },
     dashboardAppTabs() {
       return [
         {
@@ -46,7 +54,7 @@ export default {
           index: 0,
           name: this.$t('CONVERSATION.DASHBOARD_APP_TAB_MESSAGES'),
         },
-        ...this.dashboardApps.map((dashboardApp, index) => ({
+        ...this.regularDashboardApps.map((dashboardApp, index) => ({
           key: `dashboard-${dashboardApp.id}`,
           index: index + 1,
           name: dashboardApp.title,
@@ -85,6 +93,15 @@ export default {
     onDashboardAppTabChange(index) {
       this.activeIndex = index;
     },
+    isKrCopilotDashboardApp(dashboardApp = {}) {
+      if (dashboardApp.title === 'KR Copilot') return true;
+      const content = Array.isArray(dashboardApp.content)
+        ? dashboardApp.content
+        : [];
+      return content.some(configItem => {
+        return String(configItem?.url || '').includes('kits-support-copilot');
+      });
+    },
   },
 };
 </script>
@@ -101,11 +118,11 @@ export default {
       :chat="currentChat"
       :show-back-button="isOnExpandedLayout && !isInboxView"
       :class="{
-        'border-b border-b-n-weak !pt-2': !dashboardApps.length,
+        'border-b border-b-n-weak !pt-2': !regularDashboardApps.length,
       }"
     />
     <woot-tabs
-      v-if="dashboardApps.length && currentChat.id"
+      v-if="regularDashboardApps.length && currentChat.id"
       :index="activeIndex"
       class="h-10"
       @change="onDashboardAppTabChange"
@@ -119,26 +136,40 @@ export default {
         is-compact
       />
     </woot-tabs>
-    <div v-show="!activeIndex" class="flex h-full min-h-0 m-0">
-      <MessagesView
-        v-if="currentChat.id"
-        :inbox-id="inboxId"
-        :is-inbox-view="isInboxView"
+    <div class="flex h-full min-h-0 m-0">
+      <div class="flex flex-col flex-1 min-w-0">
+        <div v-show="!activeIndex" class="flex h-full min-h-0 m-0">
+          <MessagesView
+            v-if="currentChat.id"
+            :inbox-id="inboxId"
+            :is-inbox-view="isInboxView"
+          />
+          <EmptyState
+            v-if="!currentChat.id && !isInboxView"
+            :is-on-expanded-layout="isOnExpandedLayout"
+          />
+          <slot />
+        </div>
+        <DashboardAppFrame
+          v-for="(dashboardApp, index) in regularDashboardApps"
+          v-show="activeIndex - 1 === index"
+          :key="currentChat.id + '-' + dashboardApp.id"
+          :is-visible="activeIndex - 1 === index"
+          :config="dashboardApp.content"
+          :position="index"
+          :current-chat="currentChat"
+        />
+      </div>
+      <DashboardAppFrame
+        v-if="krCopilotDashboardApp && currentChat.id"
+        :key="currentChat.id + '-' + krCopilotDashboardApp.id + '-sidebar'"
+        class="hidden xl:flex w-[380px] min-w-[320px] max-w-[420px] border-l border-n-weak"
+        mode="sidebar"
+        :is-visible="true"
+        :config="krCopilotDashboardApp.content"
+        :position="9000"
+        :current-chat="currentChat"
       />
-      <EmptyState
-        v-if="!currentChat.id && !isInboxView"
-        :is-on-expanded-layout="isOnExpandedLayout"
-      />
-      <slot />
     </div>
-    <DashboardAppFrame
-      v-for="(dashboardApp, index) in dashboardApps"
-      v-show="activeIndex - 1 === index"
-      :key="currentChat.id + '-' + dashboardApp.id"
-      :is-visible="activeIndex - 1 === index"
-      :config="dashboardApps[index].content"
-      :position="index"
-      :current-chat="currentChat"
-    />
   </div>
 </template>

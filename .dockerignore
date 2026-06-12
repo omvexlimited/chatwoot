@@ -12,6 +12,8 @@ tmp
 public/packs
 node_modules
 vendor/bundle
+downloaded-docs
+kits-support-copilot
 .DS_Store
 *.swp
 *~

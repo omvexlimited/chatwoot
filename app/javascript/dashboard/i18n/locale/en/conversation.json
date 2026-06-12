@@ -222,6 +222,7 @@
       "REPLY": "Reply",
       "PRIVATE_NOTE": "Private Note",
       "SEND": "Send",
+      "SEND_AND_RESOLVE": "Send & resolve",
       "CREATE": "Add Note",
       "INSERT_READ_MORE": "Read more",
       "DISMISS_REPLY": "Dismiss reply",

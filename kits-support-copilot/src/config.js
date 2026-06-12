@@ -1,0 +1,81 @@
+export function loadConfig(env = process.env) {
+  const chatwootBaseUrl = trimTrailingSlash(envValue(env, ['CHATWOOT_BASE_URL']));
+  const openaiBaseUrl = trimTrailingSlash(envValue(env, ['OPENAI_BASE_URL'], 'https://api.openai.com'));
+  const shopifyStoreDomain = normalizeShopifyDomain(envValue(env, [
+    'SHOPIFY_STORE_DOMAIN',
+    'SHOPIFY_SHOP_DOMAIN',
+    'SHOPIFY_KITS_REPUBLIC_SHOP_NAME',
+    'SHOPIFY_SHOP_NAME'
+  ]));
+
+  return {
+    port: Number(envValue(env, ['PORT'], '3000')),
+    nodeEnv: envValue(env, ['NODE_ENV'], 'development'),
+    copilotApiToken: envValue(env, ['COPILOT_API_TOKEN']),
+    openaiApiKey: envValue(env, ['OPENAI_API_KEY']),
+    openaiModel: envValue(env, ['OPENAI_MODEL'], 'gpt-5.4-mini'),
+    openaiBaseUrl,
+    shopifyStoreDomain,
+    shopifyAdminAccessToken: envValue(env, ['SHOPIFY_ADMIN_ACCESS_TOKEN', 'SHOPIFY_ADMIN_API_ACCESS_TOKEN']),
+    shopifyClientId: envValue(env, ['SHOPIFY_CLIENT_ID', 'SHOPIFY_KITS_REPUBLIC_CLIENT_ID']),
+    shopifyClientSecret: envValue(env, ['SHOPIFY_CLIENT_SECRET', 'SHOPIFY_KITS_REPUBLIC_CLIENT_SECRET']),
+    shopifyAuthModePreference: envValue(env, ['SHOPIFY_AUTH_MODE']).toLowerCase(),
+    shopifyApiVersion: envValue(env, ['SHOPIFY_API_VERSION'], '2026-04'),
+    krProviderDatabaseUrl: envValue(env, ['KR_PROVIDER_DATABASE_URL', 'KITS_REPUBLIC_DATABASE_URL']),
+    krProviderStoreId: envValue(env, ['KR_PROVIDER_STORE_ID'], 'kits_republic'),
+    krProviderDatabaseSsl: envValue(env, ['KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
+    chatwootBaseUrl,
+    chatwootAccountId: envValue(env, ['CHATWOOT_ACCOUNT_ID']),
+    chatwootApiToken: envValue(env, ['CHATWOOT_API_TOKEN'])
+  };
+}
+
+export function getConfigStatus(config) {
+  return {
+    openai: Boolean(config.openaiApiKey),
+    shopify: Boolean(config.shopifyStoreDomain && (config.shopifyAdminAccessToken || hasShopifyClientCredentials(config))),
+    shopify_auth_mode: shopifyAuthMode(config),
+    provider_lookup: Boolean(config.krProviderDatabaseUrl),
+    chatwoot: Boolean(config.chatwootBaseUrl && config.chatwootApiToken),
+    api_token_required: Boolean(config.copilotApiToken)
+  };
+}
+
+export function hasShopifyClientCredentials(config) {
+  return Boolean(config.shopifyClientId && config.shopifyClientSecret);
+}
+
+export function shopifyAuthMode(config) {
+  if (config.shopifyAuthModePreference === 'admin_access_token' && config.shopifyAdminAccessToken) return 'admin_access_token';
+  if (config.shopifyAuthModePreference === 'client_credentials' && hasShopifyClientCredentials(config)) return 'client_credentials';
+  if (hasShopifyClientCredentials(config)) return 'client_credentials';
+  if (config.shopifyAdminAccessToken) return 'admin_access_token';
+  return null;
+}
+
+function envValue(env, names, fallback = '') {
+  for (const name of names) {
+    const raw = env[name];
+    if (raw === undefined || raw === null) continue;
+    const value = stripOptionalQuotes(String(raw).trim());
+    if (value) return value;
+  }
+  return fallback;
+}
+
+function trimTrailingSlash(value) {
+  return value.replace(/\/+$/, '');
+}
+
+function normalizeShopifyDomain(value) {
+  const trimmed = value.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  if (!trimmed) return '';
+  return trimmed.endsWith('.myshopify.com') ? trimmed : `${trimmed}.myshopify.com`;
+}
+
+function stripOptionalQuotes(value) {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1).trim();
+  }
+  return value;
+}

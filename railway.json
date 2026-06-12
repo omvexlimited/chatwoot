@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "docker/Dockerfile"
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "startCommand": "/bin/sh -lc 'bundle exec sidekiq -C config/sidekiq.yml & bundle exec rails s -p 3000 -b 0.0.0.0'"
+  }
+}
