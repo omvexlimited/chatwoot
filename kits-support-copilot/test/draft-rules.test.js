@@ -336,6 +336,91 @@ test('removes duplicate Kits Republic tracking route links', () => {
   assert.doesNotMatch(result, /You can follow it here:/);
 });
 
+test('removes orphan tracking label after a valid tracking block', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'You can follow the shipment here:',
+    '',
+    'https://kitsrepublic.com/apps/17TRACK?nums=GV501871585GB',
+    '',
+    'Delivery normally takes around 7-15 days from purchase, and this order is still within the usual recent timing we see for Royal Mail shipments.',
+    '',
+    'Shipping policy:',
+    '',
+    'https://kitsrepublic.com/policies/shipping-policy',
+    '',
+    'You can follow the shipment here:',
+    '',
+    'Best,',
+    '',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'English' },
+    shopifyContext: {
+      selected_order: {
+        fulfillments: [
+          {
+            tracking_numbers: ['GV501871585GB'],
+            tracking: [{ company: 'Royal Mail', number: 'GV501871585GB' }]
+          }
+        ]
+      }
+    },
+    deliveryEstimateContext: {
+      available: true,
+      confidence: 'medium',
+      carrier: 'Royal Mail',
+      avg_transit_days: 6.2,
+      days_since_fulfillment: 5.4,
+      estimated_remaining_days: 0.8
+    }
+  });
+
+  assert.equal((result.match(/You can follow the shipment here:/g) || []).length, 1);
+  assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
+  assert.match(result, /Delivery normally takes around 7-15 days from purchase/);
+  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Best,\n\nwww\.kitsrepublic\.com$/);
+});
+
+test('keeps the tracking label immediately associated with the canonical link', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'You can follow the shipment here:',
+    '',
+    'Track your parcel here:',
+    '',
+    'https://kitsrepublic.com/apps/17TRACK?nums=GV501871585GB',
+    '',
+    'Best,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'English' },
+    shopifyContext: {
+      selected_order: {
+        fulfillments: [
+          {
+            tracking_numbers: ['GV501871585GB'],
+            tracking: [{ company: 'Royal Mail', number: 'GV501871585GB' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.doesNotMatch(result, /You can follow the shipment here:/);
+  assert.match(result, /Track your parcel here:\n\nhttps:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=GV501871585GB/);
+  assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
+});
+
 test('removes false recent-shipment estimate wording when delivery analytics are unavailable', () => {
   const draft = [
     'Hi,',

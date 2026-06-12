@@ -33,6 +33,7 @@ export function enforceDraftRequirements({
     });
     if (block) normalizedText = insertAfterGreeting(normalizedText, block);
     normalizedText = dedupeTrackingLinks(normalizedText, trackingUrl);
+    normalizedText = removeOrphanTrackingLabels(normalizedText, trackingUrl);
     normalizedText = removeRedundantTrackingNumberLines(normalizedText, trackingNumber, trackingUrl);
   }
 
@@ -106,6 +107,27 @@ function dedupeTrackingLinks(text, trackingUrl) {
       return;
     }
     markLinkBlockForRemoval(lines, index, remove, isTrackingLabelLine);
+  });
+
+  return normalizeBlankLines(lines.filter((_, index) => !remove.has(index)).join('\n'));
+}
+
+function removeOrphanTrackingLabels(text, trackingUrl) {
+  const lines = text.split('\n');
+  const remove = new Set();
+  let keptTrackingBlock = false;
+
+  lines.forEach((line, index) => {
+    if (!isStandaloneTrackingLabel(line)) return;
+
+    const nextContentIndex = nextNonBlankLineIndex(lines, index + 1);
+    const hasTrackingLink = nextContentIndex !== -1 && lines[nextContentIndex].trim() === trackingUrl;
+    if (hasTrackingLink && !keptTrackingBlock) {
+      keptTrackingBlock = true;
+      return;
+    }
+
+    markLabelOnlyForRemoval(lines, index, remove);
   });
 
   return normalizeBlankLines(lines.filter((_, index) => !remove.has(index)).join('\n'));
@@ -212,6 +234,29 @@ function markLinkBlockForRemoval(lines, index, remove, isLabelLine) {
 
 function isTrackingLabelLine(line = '') {
   return /\b(follow|track|tracking|shipment|seguimiento|env[ií]o|zending|suivi|sendung|spedizione)\b/i.test(line);
+}
+
+function isStandaloneTrackingLabel(line = '') {
+  const value = line.trim();
+  if (!/:\s*$/.test(value) || value.length > 90) return false;
+  return /\b(follow|track|tracking|shipment|parcel|seguimiento|env[ií]o|rastrear|zending|trackingnummer|suivi|sendung|spedizione|tracciamento|envoi|livraison)\b/i.test(value);
+}
+
+function nextNonBlankLineIndex(lines, startIndex) {
+  for (let index = startIndex; index < lines.length; index += 1) {
+    if (lines[index].trim()) return index;
+  }
+  return -1;
+}
+
+function markLabelOnlyForRemoval(lines, index, remove) {
+  remove.add(index);
+
+  let cursor = index + 1;
+  while (cursor < lines.length && !lines[cursor].trim()) {
+    remove.add(cursor);
+    cursor += 1;
+  }
 }
 
 function trackingLinkBlock({ draft, trackingUrl, language }) {
