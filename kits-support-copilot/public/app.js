@@ -5,6 +5,7 @@ import {
   saveSession
 } from './session-store.js';
 import { buildContextView } from './context-summary.js';
+import { segmentCommandLinks } from './command-links.js';
 
 const SIDEBAR_SPLIT_STORAGE_KEY = 'kr-copilot-sidebar-split-v1';
 const SIDEBAR_SPLIT_LIMITS = {
@@ -72,6 +73,11 @@ window.parent?.postMessage('chatwoot-dashboard-app:fetch-info', '*');
 els.chatForm.addEventListener('submit', event => {
   event.preventDefault();
   sendAgentMessage(els.chatInput.value);
+});
+els.chatLog.addEventListener('click', event => {
+  const commandButton = event.target.closest('[data-command]');
+  if (!commandButton) return;
+  insertCommandInInput(commandButton.dataset.command || '');
 });
 
 els.newDraftButton.addEventListener('click', () => {
@@ -476,10 +482,50 @@ function renderChat() {
   for (const message of state.chatMessages) {
     const node = document.createElement('div');
     node.className = `message ${message.role === 'assistant' ? 'assistant' : 'user'}`;
-    node.textContent = message.content;
+    if (message.role === 'assistant') {
+      appendMessageContentWithCommands(node, message.content);
+    } else {
+      node.textContent = message.content;
+    }
     els.chatLog.append(node);
   }
   els.chatLog.scrollTop = els.chatLog.scrollHeight;
+}
+
+function appendMessageContentWithCommands(node, content = '') {
+  for (const segment of segmentCommandLinks(content)) {
+    if (segment.type !== 'command') {
+      node.append(document.createTextNode(segment.text));
+      continue;
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'commandLink';
+    button.dataset.command = segment.text;
+    button.textContent = segment.text;
+    button.setAttribute('aria-label', `Insert ${segment.text}`);
+    node.append(button);
+  }
+}
+
+function insertCommandInInput(command = '') {
+  const value = String(command || '').trim();
+  if (!value) return;
+
+  const input = els.chatInput;
+  const start = Number.isInteger(input.selectionStart) ? input.selectionStart : input.value.length;
+  const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
+  const before = input.value.slice(0, start);
+  const after = input.value.slice(end);
+  const prefix = before && !/\s$/.test(before) ? ' ' : '';
+  const suffix = after && !/^\s/.test(after) ? ' ' : '';
+  const nextValue = `${before}${prefix}${value}${suffix}${after}`;
+  const cursor = before.length + prefix.length + value.length;
+
+  input.value = nextValue;
+  input.focus();
+  input.setSelectionRange(cursor, cursor);
 }
 
 async function copyDraft() {

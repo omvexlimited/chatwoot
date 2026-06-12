@@ -157,6 +157,25 @@ strong {
   background: #f7f8fa;
 }
 
+.commandLink {
+  display: inline;
+  border: 0;
+  border-radius: 5px;
+  padding: 1px 4px;
+  background: #eaf2ff;
+  color: #1f6feb;
+  font: inherit;
+  font-weight: 700;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.commandLink:hover,
+.commandLink:focus-visible {
+  background: #dbeafe;
+  text-decoration: underline;
+}
+
 .actions,
 .panelHeader {
   display: flex;
