@@ -1,7 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { detectLanguageFromText, formatResponseLanguageHint, inferResponseLanguage } from './language.js';
+import {
+  applyAgentDraftLanguageOverride,
+  detectLanguageFromText,
+  formatResponseLanguageHint,
+  inferResponseLanguage
+} from './language.js';
 import { buildPublicTrackingUrl, firstTrackingNumberFromShopifyContext } from './tracking-url.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -105,14 +110,16 @@ export function buildCopilotChatPrompt({
   agentConfirmedFacts = [],
   deliveryEstimateContext
 }) {
-  const responseLanguageHint = formatResponseLanguageHint(responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext }));
-  const responseLanguageName = responseLanguage?.language || inferResponseLanguage({ latestMessage, shopifyContext }).language || 'English';
+  const normalizedChatMessages = normalizeChatMessages(chatMessages);
+  const baseResponseLanguage = responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext });
+  const effectiveResponseLanguage = applyAgentDraftLanguageOverride(baseResponseLanguage, normalizedChatMessages);
+  const responseLanguageHint = formatResponseLanguageHint(effectiveResponseLanguage);
+  const responseLanguageName = effectiveResponseLanguage?.language || 'English';
   const supportCaseSummary = JSON.stringify(supportCase || null, null, 2);
   const customsContext = buildCustomsContext({ shopifyContext, supportCase });
   const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
-  const normalizedChatMessages = normalizeChatMessages(chatMessages);
   const agentChatLanguage = inferAgentChatLanguage(normalizedChatMessages);
   const chatTranscript = JSON.stringify(normalizedChatMessages.slice(-16), null, 2);
   const agentConfirmedFactsSummary = JSON.stringify(normalizeAgentConfirmedFacts(agentConfirmedFacts), null, 2);
@@ -216,9 +223,10 @@ function draftLanguageInstruction() {
     'Hard language rule for draft:',
     'draft must be written only in the Response language / DRAFT_LANGUAGE_LOCK from the user message.',
     'The Response language is based on the latest incoming customer message first; shipping country is only a fallback.',
-    'Agent chat language is only for assistant_message and agent instructions.',
-    'If the agent gives instructions in Spanish, Portuguese, French, German, Italian, Dutch, or any language different from DRAFT_LANGUAGE_LOCK, translate the meaning into DRAFT_LANGUAGE_LOCK for the customer draft.',
-    'Never let the agent instruction language override the customer draft language.',
+    'Agent chat language is only for assistant_message and agent instructions unless the agent explicitly requests a draft language.',
+    'If Response language source is agent_explicit_language_request, that explicit agent language request is the DRAFT_LANGUAGE_LOCK and must be obeyed.',
+    'If the agent gives instructions in Spanish, Catalan, Portuguese, French, German, Italian, Dutch, or any language different from DRAFT_LANGUAGE_LOCK, translate the meaning into DRAFT_LANGUAGE_LOCK for the customer draft.',
+    'Never let incidental agent instruction language override the customer draft language.',
     'If Current draft is in the wrong language, rewrite it into DRAFT_LANGUAGE_LOCK instead of preserving that wrong language.'
   ].join(' ');
 }

@@ -8,7 +8,7 @@ import { fetchConversationMessages, createPrivateNote, prepareDraftReply } from 
 import { getShopifyContext } from './shopify.js';
 import { getAssignedProvider } from './provider-lookup.js';
 import { getDeliveryEstimateContext } from './delivery-estimates.js';
-import { detectLanguageFromText, inferResponseLanguage } from './language.js';
+import { applyAgentDraftLanguageOverride, detectLanguageFromText, inferResponseLanguage } from './language.js';
 import { detectSupportCase } from './support-case.js';
 import { enforceDraftRequirements } from './draft-rules.js';
 import { buildPublicTrackingUrl } from './tracking-url.js';
@@ -135,6 +135,8 @@ async function handleCopilotChat(req, res) {
   const body = await readJsonBody(req);
   const context = await prepareConversationContext(body);
   const chatMessages = normalizeChatMessages(body.chat_messages);
+  const effectiveResponseLanguage = applyAgentDraftLanguageOverride(context.responseLanguage, chatMessages);
+  const responseContext = { ...context, responseLanguage: effectiveResponseLanguage };
   const agentConfirmedFacts = extractAgentConfirmedFacts(chatMessages);
   const currentDraft = String(body.current_draft || '').trim();
 
@@ -145,7 +147,7 @@ async function handleCopilotChat(req, res) {
   fallbackDraft.warnings.push(...context.warnings);
 
   const fallback = {
-    assistant_message: buildFallbackAssistantMessage({ context, currentDraft, agentConfirmedFacts }),
+    assistant_message: buildFallbackAssistantMessage({ context: responseContext, currentDraft, agentConfirmedFacts }),
     draft: currentDraft || fallbackDraft.draft,
     reasoning_summary: currentDraft
       ? 'OpenAI was unavailable, so the existing draft was preserved.'
@@ -162,7 +164,7 @@ async function handleCopilotChat(req, res) {
     agentEmail: body.agent_email,
     chatMessages,
     currentDraft,
-    responseLanguage: context.responseLanguage,
+    responseLanguage: effectiveResponseLanguage,
     supportCase: context.supportCase,
     agentConfirmedFacts,
     deliveryEstimateContext: context.deliveryEstimateContext
@@ -178,7 +180,7 @@ async function handleCopilotChat(req, res) {
     draft: result.draft,
     supportCase: context.supportCase,
     shopifyContext: context.shopifyContext,
-    responseLanguage: context.responseLanguage,
+    responseLanguage: effectiveResponseLanguage,
     deliveryEstimateContext: context.deliveryEstimateContext
   });
 
@@ -188,9 +190,9 @@ async function handleCopilotChat(req, res) {
     reasoning_summary: result.reasoning_summary,
     shopify_context: context.shopifyContext,
     provider_context: context.providerContext,
-    context_summary: summarizeContext(context),
+    context_summary: summarizeContext(responseContext),
     contact_email: context.contactEmail,
-    response_language: context.responseLanguage,
+    response_language: effectiveResponseLanguage,
     support_case: context.supportCase,
     agent_confirmed_facts: agentConfirmedFacts,
     confidence: result.confidence,

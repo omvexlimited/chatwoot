@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatResponseLanguageHint, inferResponseLanguage } from '../src/language.js';
+import {
+  applyAgentDraftLanguageOverride,
+  formatResponseLanguageHint,
+  inferExplicitDraftLanguageRequest,
+  inferResponseLanguage
+} from '../src/language.js';
 
 test('uses latest customer message language before shipping country', () => {
   const responseLanguage = inferResponseLanguage({
@@ -71,4 +76,38 @@ test('does not infer language from unselected Shopify order candidates', () => {
 
   assert.equal(responseLanguage.language, 'Spanish');
   assert.equal(responseLanguage.source, 'latest_customer_message');
+});
+
+test('detects explicit Catalan draft language request from agent chat', () => {
+  const chatMessages = [
+    { role: 'user', content: 'contesta en catala. digali que si, es normal. cas aduanas' },
+    { role: 'assistant', content: 'I will update it.' },
+    { role: 'user', content: 'en catalan!!!' }
+  ];
+
+  assert.equal(inferExplicitDraftLanguageRequest(chatMessages), 'Catalan');
+
+  const responseLanguage = applyAgentDraftLanguageOverride(
+    {
+      language: 'Spanish',
+      source: 'latest_customer_message',
+      country_code: 'ES'
+    },
+    chatMessages
+  );
+
+  assert.deepEqual(responseLanguage, {
+    language: 'Catalan',
+    source: 'agent_explicit_language_request',
+    country_code: 'ES'
+  });
+  assert.equal(formatResponseLanguageHint(responseLanguage), 'Catalan (source: agent_explicit_language_request, country ES)');
+});
+
+test('does not treat normal Spanish agent instructions as a draft language override', () => {
+  const chatMessages = [
+    { role: 'user', content: 'Dile que ya hemos revisado el pedido y que pronto tendrá novedades.' }
+  ];
+
+  assert.equal(inferExplicitDraftLanguageRequest(chatMessages), null);
 });

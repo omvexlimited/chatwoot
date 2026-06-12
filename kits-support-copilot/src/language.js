@@ -39,6 +39,10 @@ const COUNTRY_LANGUAGE = {
 
 const LANGUAGE_PATTERNS = [
   {
+    language: 'Catalan',
+    pattern: /[àèòïç]|\b(catala|catal[aà]|catalan|comanda|samarreta|seguiment|enviament|gr[aà]cies|digali|diga-li)\b/i
+  },
+  {
     language: 'Spanish',
     pattern: /[¿¡ñáéíóú]|\b(hola|dile|hemos|cliente|pedido|camiseta|talla|devoluci[oó]n|reembolso|reembolsa|reemplazo|cambio|tramitado|reportado|enviado|env[ií]o|gracias|problema|molestias|arreglamos|d[oó]nde|cuando|cu[aá]ndo)\b/i
   },
@@ -65,6 +69,41 @@ const LANGUAGE_PATTERNS = [
   {
     language: 'Dutch',
     pattern: /\b(hallo|bestelling|shirt|maat|terugbetaling|retour|verzending|tracking|bedankt)\b/i
+  }
+];
+
+const EXPLICIT_LANGUAGE_REQUESTS = [
+  {
+    language: 'Catalan',
+    aliases: ['catala', 'catalan', 'català']
+  },
+  {
+    language: 'Spanish',
+    aliases: ['espanol', 'español', 'spanish', 'castellano']
+  },
+  {
+    language: 'English',
+    aliases: ['ingles', 'inglés', 'english']
+  },
+  {
+    language: 'French',
+    aliases: ['frances', 'francés', 'french']
+  },
+  {
+    language: 'German',
+    aliases: ['aleman', 'alemán', 'german', 'deutsch']
+  },
+  {
+    language: 'Italian',
+    aliases: ['italiano', 'italian']
+  },
+  {
+    language: 'Portuguese',
+    aliases: ['portugues', 'portugués', 'portuguese']
+  },
+  {
+    language: 'Dutch',
+    aliases: ['holandes', 'holandés', 'dutch', 'nederlands']
   }
 ];
 
@@ -95,6 +134,33 @@ export function inferResponseLanguage({ latestMessage = '', shopifyContext = {} 
   };
 }
 
+export function applyAgentDraftLanguageOverride(responseLanguage, chatMessages = []) {
+  const requestedLanguage = inferExplicitDraftLanguageRequest(chatMessages);
+  if (!requestedLanguage) return responseLanguage;
+
+  return {
+    ...(responseLanguage || {}),
+    language: requestedLanguage,
+    source: 'agent_explicit_language_request'
+  };
+}
+
+export function inferExplicitDraftLanguageRequest(chatMessages = []) {
+  if (!Array.isArray(chatMessages)) return null;
+
+  for (const message of chatMessages.slice(-12).reverse()) {
+    if (message?.role === 'assistant') continue;
+
+    const content = String(message?.content || '').trim();
+    if (!content) continue;
+
+    const requested = explicitLanguageFromText(content);
+    if (requested) return requested;
+  }
+
+  return null;
+}
+
 export function formatResponseLanguageHint(responseLanguage) {
   const language = responseLanguage?.language || 'English';
   const source = responseLanguage?.source || 'default';
@@ -113,4 +179,39 @@ function shippingCountryCode(shopifyContext) {
   const address = shopifyContext?.selected_order?.shipping_address;
   const code = address?.country_code || address?.countryCode || address?.countryCodeV2;
   return code ? String(code).toUpperCase() : null;
+}
+
+function explicitLanguageFromText(text) {
+  const normalized = normalizeForLanguageRequest(text);
+
+  for (const { language, aliases } of EXPLICIT_LANGUAGE_REQUESTS) {
+    if (aliases.some(alias => hasExplicitLanguageRequest(normalized, normalizeForLanguageRequest(alias)))) {
+      return language;
+    }
+  }
+
+  return null;
+}
+
+function hasExplicitLanguageRequest(text, alias) {
+  const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const directCommand = new RegExp(
+    `\\b(?:contesta|responde|respond|reply|write|redacta|escribe|fes-ho|hazlo|dilo|digali|dile)\\b.{0,40}\\b(?:en|in)?\\s*${escaped}\\b`,
+    'i'
+  );
+  const shortCorrection = new RegExp(`\\b${escaped}\\b`, 'i');
+
+  return directCommand.test(text)
+    || (/^en\s+\w+[!\s.]*$/i.test(text) && shortCorrection.test(text))
+    || (text.length <= 90 && /\bspanish\s+is\s+not\b/i.test(text) && shortCorrection.test(text))
+    || (text.length <= 80 && /[!]{2,}/.test(text) && shortCorrection.test(text));
+}
+
+function normalizeForLanguageRequest(value = '') {
+  return String(value)
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 }

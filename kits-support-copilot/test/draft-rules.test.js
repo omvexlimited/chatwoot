@@ -381,3 +381,34 @@ test('keeps recent-shipment estimate wording when delivery analytics are reliabl
 
   assert.match(result, /Based on recent shipments with Royal Mail, delivery usually takes around 6\.2 days after dispatch\./);
 });
+
+test('uses Catalan labels when the draft language is explicitly Catalan', () => {
+  const draft = [
+    'Hola,',
+    '',
+    'El paquet es troba en aduanes.',
+    '',
+    'Salutacions,www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'Catalan', source: 'agent_explicit_language_request' },
+    supportCase: { type: 'customs_pending', confidence: 'high', reasons: [] },
+    shopifyContext: {
+      selected_order: {
+        fulfillments: [
+          {
+            tracking_numbers: ['0082800082809769931372'],
+            tracking: [{ company: 'CTT Express', number: '0082800082809769931372' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.match(result, /El número de seguiment és correcte\./);
+  assert.match(result, /Pots seguir l enviament aquí:/);
+  assert.match(result, /https:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=0082800082809769931372/);
+  assert.match(result, /Salutacions,\n\nwww\.kitsrepublic\.com$/);
+});

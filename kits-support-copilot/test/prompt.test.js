@@ -501,3 +501,52 @@ test('locks draft language to customer message when agent instructions use anoth
   assert.doesNotMatch(prompt.user, /DRAFT_LANGUAGE_LOCK: Spanish/);
   assert.doesNotMatch(prompt.user, /DRAFT_LANGUAGE_LOCK: German/);
 });
+
+test('honors explicit Catalan draft language request from the agent', () => {
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Guide text',
+    conversationText: 'INCOMING Customer: Hola, no veo actualizaciones del envio.',
+    shopifyContext: {
+      selected_order: {
+        name: '#9999',
+        shipping_address: { country_code: 'ES' },
+        fulfillments: [
+          {
+            tracking_numbers: ['0082800082809769931372'],
+            tracking: [{ company: 'CTT Express', number: '0082800082809769931372' }]
+          }
+        ]
+      },
+      selection_reason: 'Matched explicit order #9999.',
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'Hola, no veo actualizaciones del envio.',
+    agentEmail: 'agent@example.com',
+    supportCase: {
+      type: 'customs_pending',
+      confidence: 'high',
+      reasons: ['tracking_present', 'local_handoff_carrier:CTT Express']
+    },
+    chatMessages: [
+      {
+        role: 'user',
+        content: 'contesta en catala. digali que si, es normal. cas aduanas'
+      },
+      {
+        role: 'assistant',
+        content: 'I will update it in Spanish.'
+      },
+      {
+        role: 'user',
+        content: 'en catalan!!!'
+      }
+    ]
+  });
+
+  assert.match(prompt.user, /Response language: Catalan \(source: agent_explicit_language_request, country ES\)/);
+  assert.match(prompt.user, /DRAFT_LANGUAGE_LOCK: Catalan/);
+  assert.match(prompt.user, /draft must be written in Catalan/);
+  assert.match(prompt.system, /If Response language source is agent_explicit_language_request/);
+  assert.doesNotMatch(prompt.user, /DRAFT_LANGUAGE_LOCK: Spanish/);
+});

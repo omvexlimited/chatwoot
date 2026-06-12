@@ -60,7 +60,7 @@ function normalizeLabelUrlSpacing(text) {
 
 function normalizeSignatureSpacing(text) {
   return text.replace(
-    /(Best regards,|Kind regards,|Regards,|Un saludo,|Saludos,|Cordialement,|Viele Gruesse,|Viele Grüße,|Grazie,|Obrigado,|Obrigada,|Met vriendelijke groet,)\s*www\.kitsrepublic\.com/gi,
+    /(Best regards,|Kind regards,|Regards,|Un saludo,|Saludos,|Salutacions,|Cordialment,|Atentament,|Cordialement,|Viele Gruesse,|Viele Grüße,|Grazie,|Obrigado,|Obrigada,|Met vriendelijke groet,)\s*www\.kitsrepublic\.com/gi,
     (_, signoff) => `${signoff}\n\nwww.kitsrepublic.com`
   );
 }
@@ -127,6 +127,7 @@ function enforceDeliveryEstimateClaims(text, deliveryEstimateContext, language) 
   const neutralTimeframe = copyForLanguage(language, {
     English: 'Our usual delivery timeframe is 7-15 days from purchase, but it can vary.',
     Spanish: 'Nuestro plazo habitual de entrega es de 7-15 días desde la compra, aunque puede variar.',
+    Catalan: 'El nostre termini habitual d entrega és de 7-15 dies des de la compra, tot i que pot variar.',
     French: 'Notre délai de livraison habituel est de 7 à 15 jours à partir de l achat, mais il peut varier.',
     German: 'Unsere übliche Lieferzeit beträgt 7-15 Tage ab Kaufdatum, kann aber variieren.',
     Italian: 'Il nostro tempo di consegna abituale è di 7-15 giorni dall acquisto, ma può variare.',
@@ -182,6 +183,7 @@ function trackingLinkBlock({ draft, trackingUrl, language }) {
     copyForLanguage(language, {
       English: 'You can follow the shipment here:',
       Spanish: 'Puedes seguir el envío aquí:',
+      Catalan: 'Pots seguir l enviament aquí:',
       French: 'Vous pouvez suivre l envoi ici:',
       German: 'Du kannst die Sendung hier verfolgen:',
       Italian: 'Puoi seguire la spedizione qui:',
@@ -200,6 +202,7 @@ function customsTrackingBlock({ draft, trackingUrl, language }) {
     lines.push(copyForLanguage(language, {
       English: 'The tracking number is correct.',
       Spanish: 'El número de seguimiento es correcto.',
+      Catalan: 'El número de seguiment és correcte.',
       French: 'Le numero de suivi est correct.',
       German: 'Die Sendungsnummer ist korrekt.',
       Italian: 'Il numero di tracking e corretto.',
@@ -213,6 +216,7 @@ function customsTrackingBlock({ draft, trackingUrl, language }) {
     lines.push(copyForLanguage(language, {
       English: 'You can follow the shipment here:',
       Spanish: 'Puedes seguir el envío aquí:',
+      Catalan: 'Pots seguir l enviament aquí:',
       French: 'Vous pouvez suivre l envoi ici:',
       German: 'Du kannst die Sendung hier verfolgen:',
       Italian: 'Puoi seguire la spedizione qui:',
@@ -283,6 +287,7 @@ function policyLinkBlock(language, type) {
     shipping: {
       English: 'Shipping policy:',
       Spanish: 'Política de envíos:',
+      Catalan: 'Política d enviaments:',
       French: 'Politique de livraison:',
       German: 'Versandrichtlinie:',
       Italian: 'Politica di spedizione:',
@@ -292,6 +297,7 @@ function policyLinkBlock(language, type) {
     refund: {
       English: 'Refund policy:',
       Spanish: 'Política de devoluciones:',
+      Catalan: 'Política de devolucions:',
       French: 'Politique de retour:',
       German: 'Rueckerstattungsrichtlinie:',
       Italian: 'Politica di reso:',
@@ -301,6 +307,7 @@ function policyLinkBlock(language, type) {
     sizeGuide: {
       English: 'Size guide:',
       Spanish: 'Guía de tallas:',
+      Catalan: 'Guia de talles:',
       French: 'Guide des tailles:',
       German: 'Groessentabelle:',
       Italian: 'Guida alle taglie:',
@@ -335,6 +342,7 @@ function copyForLanguage(language, copy) {
 
 function inferLanguageFromDraft(text) {
   if (/[¿¡ñáéíóú]|\b(hola|aduanas|seguimiento|env[ií]o)\b/i.test(text)) return 'Spanish';
+  if (/[àèòïç]|\b(seguiment|enviament|comanda|samarreta)\b/i.test(text)) return 'Catalan';
   if (/[àâçéèêëîïôùûüÿ]|\b(bonjour|suivi|livraison)\b/i.test(text)) return 'French';
   if (/[äöüß]|\b(hallo|sendung|versand)\b/i.test(text)) return 'German';
   if (/\b(ciao|spedizione|tracciamento)\b/i.test(text)) return 'Italian';
