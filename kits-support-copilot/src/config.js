@@ -17,6 +17,7 @@ export function loadConfig(env = process.env) {
     openaiBaseUrl,
     copilotDatabaseUrl: envValue(env, ['COPILOT_DATABASE_URL', 'DATABASE_URL']),
     copilotDatabaseSsl: envValue(env, ['COPILOT_DATABASE_SSL', 'DATABASE_SSL'], 'true').toLowerCase() !== 'false',
+    kitsAdminBaseUrl: trimTrailingSlash(envValue(env, ['KITS_ADMIN_BASE_URL'], 'https://web-production-c1320.up.railway.app')),
     shopifyStoreDomain,
     shopifyAdminAccessToken: envValue(env, ['SHOPIFY_ADMIN_ACCESS_TOKEN', 'SHOPIFY_ADMIN_API_ACCESS_TOKEN']),
     shopifyClientId: envValue(env, ['SHOPIFY_CLIENT_ID', 'SHOPIFY_KITS_REPUBLIC_CLIENT_ID']),

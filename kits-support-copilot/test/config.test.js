@@ -96,3 +96,11 @@ test('falls back to DATABASE_URL for copilot memory', () => {
   assert.equal(config.copilotDatabaseUrl, 'postgres://railway');
   assert.equal(getConfigStatus(config).memory, true);
 });
+
+test('supports Kits admin base URL override', () => {
+  const config = loadConfig({
+    KITS_ADMIN_BASE_URL: 'https://admin.example.test/'
+  });
+
+  assert.equal(config.kitsAdminBaseUrl, 'https://admin.example.test');
+});

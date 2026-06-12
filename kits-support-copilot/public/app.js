@@ -763,6 +763,17 @@ function renderContextCard(card) {
       value.textContent = row.value || '-';
     }
 
+    for (const rowLink of row.links || []) {
+      if (!rowLink?.url) continue;
+      const link = document.createElement('a');
+      link.className = 'contextLink contextInlineLink';
+      link.href = rowLink.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = rowLink.label || 'Open';
+      value.append(link);
+    }
+
     item.append(label, value);
     node.append(item);
   }

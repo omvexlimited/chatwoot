@@ -435,6 +435,7 @@ function summarizeContext(context) {
   return {
     customer: order.email || context.contactEmail || null,
     order: order.name,
+    admin_order_url: buildKitsAdminOrderUrl(order),
     shopify_admin_url: buildShopifyAdminOrderUrl(order),
     selected_order_ref: order.name,
     order_candidates: summarizeOrderCandidates(context.shopifyContext.orders, order.name),
@@ -485,6 +486,7 @@ function summarizeOrderCandidates(orders = [], selectedOrderRef = '') {
     const tracking = fulfillment?.tracking?.find(item => item?.number || item?.url) || fulfillment?.tracking?.[0];
     return {
       order: order.name,
+      admin_order_url: buildKitsAdminOrderUrl(order),
       shopify_admin_url: buildShopifyAdminOrderUrl(order),
       date: order.created_at || null,
       shopify_status: order.fulfillment_status || null,
@@ -502,6 +504,12 @@ function buildShopifyAdminOrderUrl(order = {}) {
   const orderId = String(order.id || '').match(/(\d+)$/)?.[1];
   if (!config.shopifyStoreDomain || !orderId) return null;
   return `https://${config.shopifyStoreDomain}/admin/orders/${orderId}`;
+}
+
+function buildKitsAdminOrderUrl(order = {}) {
+  const orderName = String(order.name || '').trim();
+  if (!config.kitsAdminBaseUrl || !orderName) return null;
+  return `${config.kitsAdminBaseUrl}/kits-republic/orders?q=${encodeURIComponent(orderName)}`;
 }
 
 function selectSummaryFulfillment(order = {}) {

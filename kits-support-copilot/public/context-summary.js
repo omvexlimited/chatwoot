@@ -8,6 +8,7 @@ export function buildContextView(result = {}) {
   const orderDate = formatContextDate(summary.order_created_at || order?.created_at);
   const fulfillmentDate = formatContextDate(summary.fulfillment_created_at || orderFulfillment(order)?.created_at);
   const orderName = summary.order || order?.name || null;
+  const adminOrderUrl = safeHttpUrl(summary.admin_order_url);
   const shopifyAdminUrl = safeHttpUrl(summary.shopify_admin_url);
   const provider = summary.provider || order?.provider || null;
   const fulfillmentStatus = summary.fulfillment_status || order?.fulfillment_status || null;
@@ -28,7 +29,7 @@ export function buildContextView(result = {}) {
     },
     cards: [
       customerCard({ result, summary, responseLanguage }),
-      orderCard({ orderName, orderDate, shopifyAdminUrl, provider, fulfillmentDate, fulfillmentStatus, summary }),
+      orderCard({ orderName, orderDate, adminOrderUrl, shopifyAdminUrl, provider, fulfillmentDate, fulfillmentStatus, summary }),
       itemsCard(lineItems),
       ordersCard(orderCandidates),
       trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate }),
@@ -77,11 +78,16 @@ function customerCard({ result, summary, responseLanguage }) {
   };
 }
 
-function orderCard({ orderName, orderDate, shopifyAdminUrl, provider, fulfillmentDate, fulfillmentStatus, summary }) {
+function orderCard({ orderName, orderDate, adminOrderUrl, shopifyAdminUrl, provider, fulfillmentDate, fulfillmentStatus, summary }) {
   return {
     title: 'Order',
     rows: [
-      { label: 'Order', value: orderName || 'No order selected', url: shopifyAdminUrl },
+      {
+        label: 'Order',
+        value: orderName || 'No order selected',
+        url: adminOrderUrl,
+        links: shopifyAdminUrl ? [{ label: 'Shopify', url: shopifyAdminUrl }] : []
+      },
       { label: 'Date', value: orderDate || '-' },
       { label: 'Provider', value: provider || '-' },
       { label: 'Fulfillment date', value: fulfillmentDate || '-' },
@@ -156,6 +162,7 @@ function normalizeOrderCandidates(candidates) {
     country: formatCountry(candidate.country, candidate.country_code),
     tracking_carrier: candidate.tracking_carrier || '',
     tracking_number: candidate.tracking_number || '',
+    admin_order_url: safeHttpUrl(candidate.admin_order_url),
     shopify_admin_url: safeHttpUrl(candidate.shopify_admin_url),
     selected: Boolean(candidate.selected)
   }));

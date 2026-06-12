@@ -13,7 +13,13 @@ test('builds context summary with tracking link and customs case', () => {
   assert.equal(view.topBar.case, 'customs_pending');
   assert.equal(view.topBar.warnings, '1');
   assert.deepEqual(order.rows.map(row => row.value), ['#1421', '01 Jun 2026', 'Mign Jin (1) · 194939', '03 Jun 2026', 'FULFILLED', 'FULFILLED']);
-  assert.equal(order.rows.find(row => row.label === 'Order').url, 'https://kits-republic.myshopify.com/admin/orders/1234567890');
+  assert.equal(order.rows.find(row => row.label === 'Order').url, 'https://web-production-c1320.up.railway.app/kits-republic/orders?q=%231421');
+  assert.deepEqual(order.rows.find(row => row.label === 'Order').links, [
+    {
+      label: 'Shopify',
+      url: 'https://kits-republic.myshopify.com/admin/orders/1234567890'
+    }
+  ]);
   assert.equal(items.items.length, 1);
   assert.equal(items.items[0].title, '1x Spain 2010 Home Jersey');
   assert.equal(items.items[0].meta, 'SKU ES-2010-HOME-L | UNFULFILLED');
@@ -168,6 +174,7 @@ function contextResult({
     context_summary: {
       customer: 'customer@example.com',
       order: '#1421',
+      admin_order_url: 'https://web-production-c1320.up.railway.app/kits-republic/orders?q=%231421',
       shopify_admin_url: 'https://kits-republic.myshopify.com/admin/orders/1234567890',
       order_created_at: '2026-06-01T10:00:00Z',
       provider: 'Mign Jin (1) · 194939',
