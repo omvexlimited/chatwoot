@@ -24,7 +24,8 @@ test('builds context summary with tracking link and customs case', () => {
   assert.equal(items.items[0].title, '1x Spain 2010 Home Jersey');
   assert.equal(items.items[0].meta, 'SKU ES-2010-HOME-L | UNFULFILLED');
   assert.equal(items.items[0].personalization, 'Name: DAVID VILLA | Number: 7');
-  assert.equal(tracking.action.url, 'https://tracking.example.test/');
+  assert.equal(tracking.rows.find(row => row.label === 'Number').url, 'https://tracking.example.test/');
+  assert.equal(tracking.action, undefined);
   assert.deepEqual(tracking.rows.map(row => row.value), ['CTT Express', 'KR123', 'FULFILLED']);
   assert.equal(supportCase.emphasis, true);
   assert.match(supportCase.rows.find(row => row.label === 'Reasons').value, /tracking_present/);
@@ -39,7 +40,7 @@ test('builds context summary without broken tracking action', () => {
   const view = buildContextView(result);
   const tracking = view.cards.find(card => card.title === 'Tracking');
 
-  assert.equal(tracking.action, null);
+  assert.equal(tracking.action, undefined);
   assert.deepEqual(tracking.rows.map(row => row.value), ['No tracking yet', 'No tracking yet', 'FULFILLED']);
 });
 

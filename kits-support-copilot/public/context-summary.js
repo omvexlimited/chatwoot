@@ -120,11 +120,14 @@ function trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, d
     title: 'Tracking',
     rows: [
       { label: 'Carrier', value: trackingCarrier || (hasTracking ? '-' : 'No tracking yet') },
-      { label: 'Number', value: trackingNumber || (hasTracking ? '-' : 'No tracking yet') },
+      {
+        label: 'Number',
+        value: trackingNumber || (hasTracking ? '-' : 'No tracking yet'),
+        url: trackingNumber && trackingUrl ? trackingUrl : null
+      },
       { label: 'Status', value: summary.shipment_status || '-' },
       ...estimateRows
-    ],
-    action: trackingUrl ? { label: 'Open tracking', url: trackingUrl } : null
+    ]
   };
 }
 
