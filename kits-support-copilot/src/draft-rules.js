@@ -22,6 +22,8 @@ export function enforceDraftRequirements({
   const trackingNumber = firstTrackingNumberFromShopifyContext(shopifyContext);
   const trackingUrl = buildPublicTrackingUrl(trackingNumber);
 
+  normalizedText = ensureWarmOpening(normalizedText, language);
+
   if (trackingUrl) {
     normalizedText = canonicalizeTrackingLinks(normalizedText, trackingUrl);
     const block = trackingBlock({
@@ -31,7 +33,7 @@ export function enforceDraftRequirements({
       language,
       supportCase
     });
-    if (block) normalizedText = insertAfterGreeting(normalizedText, block);
+    if (block) normalizedText = insertBeforeSignature(normalizedText, block);
     normalizedText = dedupeTrackingLinks(normalizedText, trackingUrl);
     normalizedText = removeOrphanTrackingLabels(normalizedText, trackingUrl);
     normalizedText = removeRedundantTrackingNumberLines(normalizedText, trackingNumber, trackingUrl);
@@ -39,6 +41,7 @@ export function enforceDraftRequirements({
 
   normalizedText = enforceDeliveryEstimateClaims(normalizedText, deliveryEstimateContext, language);
   normalizedText = applyRequiredPolicyLinks(normalizedText, language);
+  if (trackingUrl) normalizedText = moveTrackingBlockBeforeSignature(normalizedText, trackingUrl, language);
   return normalizeDraftFormatting(normalizedText);
 }
 
@@ -51,9 +54,17 @@ function canonicalizeTrackingLinks(text, trackingUrl) {
 
 function normalizeDraftFormatting(text) {
   let value = String(text || '').replace(/\r\n/g, '\n');
+  value = normalizeDashPunctuation(value);
   value = normalizeLabelUrlSpacing(value);
   value = normalizeSignatureSpacing(value);
   return normalizeBlankLines(value);
+}
+
+function normalizeDashPunctuation(text) {
+  return text
+    .replace(/\s+—\s+/g, ', ')
+    .replace(/\s+–\s+/g, ', ')
+    .replace(/—/g, '-');
 }
 
 function normalizeLabelUrlSpacing(text) {
@@ -67,9 +78,37 @@ function normalizeSignatureSpacing(text) {
   );
 }
 
-function insertAfterGreeting(text, block) {
+function ensureWarmOpening(text, language) {
+  if (hasThanksText(text)) return text;
+  return insertAfterGreetingOrAtStart(text, thankYouSentence(language));
+}
+
+function hasThanksText(text) {
+  return /\b(thank you|thanks|gracias|moltes gr[aà]cies|merci|danke|vielen dank|grazie|obrigad[oa]|bedankt)\b/i.test(text);
+}
+
+function thankYouSentence(language) {
+  return copyForLanguage(language, {
+    English: 'Thank you for your email.',
+    Spanish: 'Muchas gracias por tu correo.',
+    Catalan: 'Moltes gràcies pel teu missatge.',
+    French: 'Merci beaucoup pour votre message.',
+    German: 'Vielen Dank fuer deine Nachricht.',
+    Italian: 'Grazie mille per il tuo messaggio.',
+    Portuguese: 'Muito obrigado pela tua mensagem.',
+    Dutch: 'Bedankt voor je bericht.'
+  });
+}
+
+function insertAfterGreetingOrAtStart(text, block) {
   const lines = text.split('\n');
-  const insertIndex = greetingEndIndex(lines);
+  const firstTextIndex = lines.findIndex(line => line.trim());
+  let insertIndex = firstTextIndex;
+  if (firstTextIndex === -1) {
+    insertIndex = 0;
+  } else if (isGreetingLine(lines[firstTextIndex])) {
+    insertIndex = firstTextIndex + 1;
+  }
   lines.splice(insertIndex, 0, '', block, '');
   return normalizeBlankLines(lines.join('\n'));
 }
@@ -110,6 +149,25 @@ function dedupeTrackingLinks(text, trackingUrl) {
   });
 
   return normalizeBlankLines(lines.filter((_, index) => !remove.has(index)).join('\n'));
+}
+
+function moveTrackingBlockBeforeSignature(text, trackingUrl, language) {
+  const lines = text.split('\n');
+  const linkIndex = lines.findIndex(line => line.trim() === trackingUrl);
+  if (linkIndex === -1) return text;
+
+  let startIndex = linkIndex;
+  const previousContentIndex = previousNonBlankLineIndex(lines, linkIndex - 1);
+  if (previousContentIndex !== -1 && isStandaloneTrackingLabel(lines[previousContentIndex])) {
+    startIndex = previousContentIndex;
+  }
+
+  const block = startIndex === linkIndex
+    ? [trackingLabel(language), '', trackingUrl].join('\n')
+    : normalizeBlankLines(lines.slice(startIndex, linkIndex + 1).join('\n'));
+
+  const remaining = lines.filter((_, index) => index < startIndex || index > linkIndex).join('\n');
+  return insertBeforeSignature(normalizeBlankLines(remaining), block);
 }
 
 function removeOrphanTrackingLabels(text, trackingUrl) {
@@ -233,17 +291,24 @@ function markLinkBlockForRemoval(lines, index, remove, isLabelLine) {
 }
 
 function isTrackingLabelLine(line = '') {
-  return /\b(follow|track|tracking|shipment|seguimiento|env[ií]o|zending|suivi|sendung|spedizione)\b/i.test(line);
+  return /\b(follow|track|tracking|shipment|seguimiento|env[ií]o|seguiment|enviament|zending|suivi|sendung|spedizione)\b/i.test(line);
 }
 
 function isStandaloneTrackingLabel(line = '') {
   const value = line.trim();
   if (!/:\s*$/.test(value) || value.length > 90) return false;
-  return /\b(follow|track|tracking|shipment|parcel|seguimiento|env[ií]o|rastrear|zending|trackingnummer|suivi|sendung|spedizione|tracciamento|envoi|livraison)\b/i.test(value);
+  return /\b(follow|track|tracking|shipment|parcel|seguimiento|env[ií]o|rastrear|seguiment|enviament|zending|trackingnummer|suivi|sendung|spedizione|tracciamento|envoi|livraison)\b/i.test(value);
 }
 
 function nextNonBlankLineIndex(lines, startIndex) {
   for (let index = startIndex; index < lines.length; index += 1) {
+    if (lines[index].trim()) return index;
+  }
+  return -1;
+}
+
+function previousNonBlankLineIndex(lines, startIndex) {
+  for (let index = startIndex; index >= 0; index -= 1) {
     if (lines[index].trim()) return index;
   }
   return -1;
@@ -262,16 +327,7 @@ function markLabelOnlyForRemoval(lines, index, remove) {
 function trackingLinkBlock({ draft, trackingUrl, language }) {
   if (hasPublicTrackingUrl(draft, trackingUrl)) return '';
   return [
-    copyForLanguage(language, {
-      English: 'You can follow the shipment here:',
-      Spanish: 'Puedes seguir el envío aquí:',
-      Catalan: 'Pots seguir l enviament aquí:',
-      French: 'Vous pouvez suivre l envoi ici:',
-      German: 'Du kannst die Sendung hier verfolgen:',
-      Italian: 'Puoi seguire la spedizione qui:',
-      Portuguese: 'Pode acompanhar o envio aqui:',
-      Dutch: 'Je kunt de zending hier volgen:'
-    }),
+    trackingLabel(language),
     '',
     trackingUrl
   ].join('\n');
@@ -295,20 +351,24 @@ function customsTrackingBlock({ draft, trackingUrl, language }) {
 
   if (!draft.includes(trackingUrl)) {
     if (lines.length) lines.push('');
-    lines.push(copyForLanguage(language, {
-      English: 'You can follow the shipment here:',
-      Spanish: 'Puedes seguir el envío aquí:',
-      Catalan: 'Pots seguir l enviament aquí:',
-      French: 'Vous pouvez suivre l envoi ici:',
-      German: 'Du kannst die Sendung hier verfolgen:',
-      Italian: 'Puoi seguire la spedizione qui:',
-      Portuguese: 'Pode acompanhar o envio aqui:',
-      Dutch: 'Je kunt de zending hier volgen:'
-    }));
+    lines.push(trackingLabel(language));
     lines.push('', trackingUrl);
   }
 
   return lines.length ? lines.join('\n') : '';
+}
+
+function trackingLabel(language) {
+  return copyForLanguage(language, {
+    English: 'You can follow the shipment here:',
+    Spanish: 'Puedes seguir el envío aquí:',
+    Catalan: 'Pots seguir l enviament aquí:',
+    French: 'Vous pouvez suivre l envoi ici:',
+    German: 'Du kannst die Sendung hier verfolgen:',
+    Italian: 'Puoi seguire la spedizione qui:',
+    Portuguese: 'Pode acompanhar o envio aqui:',
+    Dutch: 'Je kunt de zending hier volgen:'
+  });
 }
 
 function applyRequiredPolicyLinks(text, language) {
@@ -410,7 +470,12 @@ function insertBeforeSignature(text, block) {
   const signatureIndex = lines.findIndex(line => line.trim() === 'www.kitsrepublic.com');
   if (signatureIndex === -1) return normalizeBlankLines([text, '', block].join('\n'));
 
-  lines.splice(signatureIndex, 0, '', block, '');
+  const previousContentIndex = previousNonBlankLineIndex(lines, signatureIndex - 1);
+  const insertIndex = previousContentIndex !== -1 && isSignOffLine(lines[previousContentIndex])
+    ? previousContentIndex
+    : signatureIndex;
+
+  lines.splice(insertIndex, 0, '', block, '');
   return normalizeBlankLines(lines.join('\n'));
 }
 
@@ -433,10 +498,12 @@ function inferLanguageFromDraft(text) {
   return 'English';
 }
 
-function greetingEndIndex(lines) {
-  const firstTextIndex = lines.findIndex(line => line.trim());
-  if (firstTextIndex === -1) return 0;
-  return firstTextIndex + 1;
+function isGreetingLine(line = '') {
+  return /^(hi|hello|hey|hola|bonjour|hallo|ciao|ol[aá]|dear|salut|buenas|bom dia|boa tarde|good morning|good afternoon)[\s\wÀ-ÿ.'-]*,?$/i.test(line.trim());
+}
+
+function isSignOffLine(line = '') {
+  return /^(best|best regards|kind regards|regards|un saludo|saludos|salutacions|cordialment|atentament|cordialement|viele gruesse|viele grüße|grazie|obrigado|obrigada|met vriendelijke groet),?$/i.test(line.trim());
 }
 
 function normalizeBlankLines(text) {

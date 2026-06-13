@@ -55,6 +55,10 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /delivered size exchange/);
   assert.match(prompt.system, /6BMDASXWXFS2/);
   assert.match(prompt.system, /Apple Pay\/no confirmation email/);
+  assert.match(prompt.system, /Customer tone rule/);
+  assert.match(prompt.system, /Thank you for your email/);
+  assert.match(prompt.system, /apology for the inconvenience/);
+  assert.match(prompt.system, /em dash character U\+2014/);
   assert.match(prompt.system, /customs_pending/);
   assert.match(prompt.system, /customs inspection\/customs clearance/);
   assert.match(prompt.system, /Delivery estimate rule/);
@@ -78,6 +82,7 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /Use one customer-facing link per topic and never duplicate links/);
   assert.match(prompt.system, /never use carrier tracking URLs such as Royal Mail, CTT, Colissimo, La Poste, DHL, Evri, 17track\.net, shopify\.17track\.net/);
   assert.match(prompt.system, /Do not repeat the tracking number on a separate line/);
+  assert.match(prompt.system, /immediately before the sign-off/);
   assert.match(prompt.system, /Only include https:\/\/kitsrepublic\.com\/policies\/shipping-policy when you mention an official delivery\/processing timeframe/);
   assert.match(prompt.system, /returns.*https:\/\/kitsrepublic\.com\/policies\/refund-policy/i);
   assert.match(prompt.user, /Current draft/);

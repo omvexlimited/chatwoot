@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { enforceDraftRequirements } from '../src/draft-rules.js';
 
-test('adds public tracking link after greeting for customs pending drafts', () => {
+test('adds public tracking link near sign-off for customs pending drafts', () => {
   const draft = [
     'Hi,',
     '',
@@ -28,8 +28,10 @@ test('adds public tracking link after greeting for customs pending drafts', () =
   });
 
   assert.match(result, /The tracking number is correct\./);
+  assert.match(result, /Thank you for your email\./);
   assert.match(result, /https:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=0141605773793172/);
-  assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('The parcel is going through customs clearance.'));
+  assert.ok(result.indexOf('The parcel is going through customs clearance.') < result.indexOf('You can follow the shipment here:'));
+  assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('Kind regards,'));
   assert.doesNotMatch(result, /shipping-policy/);
   assert.match(result, /www\.kitsrepublic\.com$/);
 });
@@ -38,6 +40,37 @@ test('does not alter non-customs drafts', () => {
   const draft = 'Hi,\n\nThanks.\n\nwww.kitsrepublic.com';
 
   assert.equal(enforceDraftRequirements({ draft, supportCase: null }), draft);
+});
+
+test('removes em dash punctuation from drafts', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'Thank you — we will do that.',
+    '',
+    'Best,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({ draft, responseLanguage: { language: 'English' } });
+
+  assert.doesNotMatch(result, /—/);
+  assert.match(result, /Thank you, we will do that\./);
+});
+
+test('adds warm opening when the draft does not thank the customer', () => {
+  const draft = [
+    'Hola,',
+    '',
+    'Hemos revisado tu pedido.',
+    '',
+    'Un saludo,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({ draft, responseLanguage: { language: 'Spanish' } });
+
+  assert.match(result, /Hola,\n\nMuchas gracias por tu correo\.\n\nHemos revisado tu pedido\./);
 });
 
 test('adds public tracking link when a non-customs draft only includes the tracking number', () => {
@@ -217,6 +250,11 @@ test('cleans duplicate tracking links, misplaced shipping policy, and cramped si
     result.indexOf('Shipping policy:') <
       result.indexOf('Once customs/pre-entry processing is complete')
   );
+  assert.ok(
+    result.indexOf('Once customs/pre-entry processing is complete') <
+      result.indexOf('You can follow the shipment here:')
+  );
+  assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('Best regards,'));
   assert.match(result, /Best regards,\n\nwww\.kitsrepublic\.com$/);
 });
 
@@ -262,6 +300,8 @@ test('removes Royal Mail tracking links and redundant tracking number lines', ()
   assert.doesNotMatch(result, /royalmail\.com/);
   assert.doesNotMatch(result, /^Tracking number:/m);
   assert.doesNotMatch(result, /Track your parcel here:/);
+  assert.ok(result.indexOf('This means the shipping label') < result.indexOf('You can follow the shipment here:'));
+  assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('Best regards,'));
   assert.match(result, /Best regards,\n\nwww\.kitsrepublic\.com$/);
 });
 

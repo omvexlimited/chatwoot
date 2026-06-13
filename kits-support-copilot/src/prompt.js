@@ -65,6 +65,7 @@ export function buildPrompt({
       'For delivered size exchange or sizing preference cases, include the refund policy link, say return shipping is paid by the customer, say returns go to China, and include the 50% coupon code exactly as 6BMDASXWXFS2 when the customer is asking for a size change.',
       'For size exchange policy questions, do not block the answer just because no Shopify order was selected; order details are only needed if the agent will process a return or inspect a specific order.',
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
+      supportToneInstruction(),
       linkInstruction(),
       customsPendingInstruction(),
       deliveryEstimateInstruction(),
@@ -171,6 +172,7 @@ export function buildCopilotChatPrompt({
       'For delivered size exchange or sizing preference cases, include the refund policy link, say return shipping is paid by the customer, say returns go to China, and include the 50% coupon code exactly as 6BMDASXWXFS2 when the customer is asking for a size change.',
       'For size exchange policy questions, do not block the answer just because no Shopify order was selected; order details are only needed if the agent will process a return or inspect a specific order.',
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
+      supportToneInstruction(),
       linkInstruction(),
       customsPendingInstruction(),
       deliveryEstimateInstruction(),
@@ -276,6 +278,18 @@ function linkInstruction() {
   ].join(' ');
 }
 
+function supportToneInstruction() {
+  return [
+    'Customer tone rule:',
+    'Drafts must be warm, professional, brief, and clearly customer-service oriented, not dry or purely operational.',
+    'After the greeting, include a short thank-you in the customer language, such as "Thank you for your email.", "Muchas gracias por tu correo.", or the natural equivalent.',
+    'If the customer is replying in an ongoing thread, thanking them for their reply/message is also acceptable.',
+    'When the issue is caused by Kits Republic, the supplier, stock, incorrect item, wrong size, printing error, replacement/refund handling, an open internal issue, or an agent-confirmed operational action, include a brief apology for the inconvenience in the customer language.',
+    'For neutral tracking, customs, or carrier-status cases, thank the customer and explain clearly, but do not imply Kits Republic caused the issue unless the agent says so.',
+    'Do not use the em dash character U+2014 in customer drafts. Use a comma, period, colon, or normal hyphen instead.'
+  ].join(' ');
+}
+
 function deliveryEstimateInstruction() {
   return [
     'Delivery estimate rule:',
@@ -298,18 +312,18 @@ function deliveryEstimateInstruction() {
 function customsPendingInstruction() {
   return [
     'If Support case type is customs_pending, follow this response structure in the customer language:',
-    '1. Use a simple greeting, usually without the customer name.',
+    '1. Use a simple greeting, usually without the customer name, followed by a short thank-you for the email/message.',
     '2. Say we reviewed the shipment and it is currently in customs inspection/customs clearance.',
     '3. Explain the local carrier status from Customs context. For CTT, explain that "Pending receipt at CTT Express" / "Pendiente de recepcion en CTT Express" means the label/details were sent to CTT, but CTT has not physically received the parcel yet.',
     '4. For CTT, say this is equivalent to "Pendiente de entrada en red" and, for Kits Republic shipments from China, it usually means the parcel is still before CTT handoff: in China, in flight, in consolidation, or in customs/pre-entry processing.',
     '5. Say this phase is outside our control and, when relevant, customs are experiencing more volume than usual because of the World Cup, so some shipments are delayed.',
-    '6. Include "You can follow the shipment here:" or the equivalent in the customer language, followed by the Kits Republic 17TRACK URL on its own line.',
-    '7. Say that once customs/pre-entry processing finishes and the parcel is handed to the local carrier, tracking will update automatically and delivery usually happens soon after local carrier handoff.',
-    '8. If Delivery timing guidance is usable, add its customer-safe timing reassurance after the customs explanation and before the tracking link. Do not mention exact remaining days.',
-    'Prefer this Spanish style for CTT cases: "Hola," then "Hemos revisado tu envio y actualmente se encuentra en inspeccion de aduanas." then explain "Pendiente de recepcion en CTT Express", that CTT has the details but not the physical parcel yet, World Cup customs delays, the tracking link, and the automatic update after customs release/local handoff.',
-    'Prefer this English style for no-update Royal Mail cases: "Hi," then "We have reviewed the shipment and it is currently in customs clearance. This means the parcel has not yet passed the customs check, and once that process is completed, the tracking status will update automatically." then the canonical Kits Republic tracking link.',
+    '6. Say that once customs/pre-entry processing finishes and the parcel is handed to the local carrier, tracking will update automatically and delivery usually happens soon after local carrier handoff.',
+    '7. If Delivery timing guidance is usable, add its customer-safe timing reassurance after the customs explanation and before the tracking link. Do not mention exact remaining days.',
+    '8. Put "You can follow the shipment here:" or the equivalent in the customer language near the end of the reply, followed by the Kits Republic 17TRACK URL on its own line, immediately before the sign-off.',
+    'Prefer this Spanish style for CTT cases: "Hola," then "Muchas gracias por tu correo." then "Hemos revisado tu envio y actualmente se encuentra en inspeccion de aduanas." then explain "Pendiente de recepcion en CTT Express", that CTT has the details but not the physical parcel yet, World Cup customs delays, automatic update after customs release/local handoff, then the tracking link at the end before the sign-off.',
+    'Prefer this English style for no-update Royal Mail cases: "Hi," then "Thank you for your email." then "We have reviewed the shipment and it is currently in customs clearance. This means the parcel has not yet passed the customs check, and once that process is completed, the tracking status will update automatically." then the canonical Kits Republic tracking link at the end before the sign-off.',
     'Do not say "scanned into their network", "fully received into their network", or similar carrier-network wording. Use normal customer language: customs clearance, customs check, tracking status will update automatically.',
-    'Avoid filler such as "Gracias por contactarnos", "Gracias por tu paciencia y comprension", and avoid mentioning the order number unless it is necessary to identify the case.',
+    'Avoid filler and avoid mentioning the order number unless it is necessary to identify the case.',
     'Do not add vague reassurances, do not blame the customer, do not promise an exact delivery date, and do not use the Shopify proxy tracking URL.'
   ].join(' ');
 }
