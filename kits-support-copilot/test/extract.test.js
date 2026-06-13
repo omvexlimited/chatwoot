@@ -20,6 +20,16 @@ test('extracts localized order refs without requiring hash', () => {
   assert.equal(result.orderRefs.includes('#1558'), true);
 });
 
+test('does not treat normal words after tracking as tracking numbers', () => {
+  const result = extractIdentifiers('El tracking indicado no se actualiza.');
+  assert.deepEqual(result.trackingNumbers, []);
+});
+
+test('extracts real tracking numbers after tracking hints', () => {
+  const result = extractIdentifiers('Tracking indicado: 006239005280976987333001.');
+  assert.deepEqual(result.trackingNumbers, ['006239005280976987333001']);
+});
+
 test('normalizes order refs', () => {
   assert.equal(normalizeOrderRef('1234'), '#1234');
   assert.equal(normalizeOrderRef('#1234'), '#1234');
