@@ -40,35 +40,40 @@ const COUNTRY_LANGUAGE = {
 const LANGUAGE_PATTERNS = [
   {
     language: 'Catalan',
-    pattern: /[àèòïç]|\b(catala|catal[aà]|catalan|comanda|samarreta|seguiment|enviament|gr[aà]cies|digali|diga-li)\b/i
+    strongPattern: /[àèòïç]/i,
+    pattern: /\b(catala|catal[aà]|catalan|comanda|samarreta|seguiment|enviament|gr[aà]cies|digali|diga-li)\b/gi
   },
   {
     language: 'Spanish',
-    pattern: /[¿¡ñáéíóú]|\b(hola|dile|hemos|cliente|pedido|camiseta|talla|devoluci[oó]n|reembolso|reembolsa|reemplazo|cambio|tramitado|reportado|enviado|env[ií]o|gracias|problema|molestias|arreglamos|d[oó]nde|cuando|cu[aá]ndo)\b/i
+    strongPattern: /[¿¡ñáéíóú]/i,
+    pattern: /\b(hola|dile|hemos|cliente|pedido|camiseta|talla|devoluci[oó]n|reembolso|reembolsa|reemplazo|cambio|tramitado|reportado|enviado|env[ií]o|gracias|problema|molestias|arreglamos|d[oó]nde|cuando|cu[aá]ndo)\b/gi
   },
   {
     language: 'English',
-    pattern: /\b(hello|hi|order|jersey|shirt|size|refund|return|shipping|tracking|delivered|received|where|when|thanks|thank you)\b/i
+    pattern: /\b(hello|hi|order|jersey|shirt|size|refund|return|shipping|tracking|delivered|received|where|when|thanks|thank you)\b/gi
   },
   {
     language: 'French',
-    pattern: /[àâçéèêëîïôùûüÿ]|\b(bonjour|commande|maillot|taille|remboursement|retour|livraison|suivi|merci)\b/i
+    strongPattern: /[àâçéèêëîïôùûüÿ]/i,
+    pattern: /\b(bonjour|commande|maillot|taille|remboursement|retour|livraison|suivi|merci)\b/gi
   },
   {
     language: 'German',
-    pattern: /[äöüß]|\b(hallo|bestellung|trikot|gr[oö]ße|ruckgabe|r[üu]ckerstattung|versand|sendung|danke)\b/i
+    strongPattern: /[äöüß]/i,
+    pattern: /\b(hallo|ich|habe|meine|mein|keine|bitte|bestellung|trikot|gr[oö]ße|ruckgabe|r[üu]ckerstattung|versand|sendung|paket|angekommen|erhalten|danke)\b/gi
   },
   {
     language: 'Italian',
-    pattern: /\b(ciao|ordine|maglia|taglia|rimborso|reso|spedizione|tracciamento|grazie)\b/i
+    pattern: /\b(ciao|ordine|maglia|taglia|rimborso|reso|spedizione|tracciamento|grazie)\b/gi
   },
   {
     language: 'Portuguese',
-    pattern: /[ãõç]|\b(ol[aá]|pedido|camisola|tamanho|reembolso|devolu[cç][aã]o|envio|rastreamento|obrigado|obrigada)\b/i
+    strongPattern: /[ãõç]/i,
+    pattern: /\b(ol[aá]|pedido|camisola|tamanho|reembolso|devolu[cç][aã]o|envio|rastreamento|obrigado|obrigada)\b/gi
   },
   {
     language: 'Dutch',
-    pattern: /\b(hallo|bestelling|shirt|maat|terugbetaling|retour|verzending|tracking|bedankt)\b/i
+    pattern: /\b(hallo|bestelling|shirt|maat|terugbetaling|retour|verzending|tracking|bedankt)\b/gi
   }
 ];
 
@@ -169,10 +174,34 @@ export function formatResponseLanguageHint(responseLanguage) {
 }
 
 export function detectLanguageFromText(text) {
-  const value = String(text || '').trim();
+  const value = normalizeLanguageSample(text);
   if (value.length < 8) return null;
 
-  return LANGUAGE_PATTERNS.find(({ pattern }) => pattern.test(value))?.language || null;
+  const scores = LANGUAGE_PATTERNS
+    .map(({ language, pattern, strongPattern }) => ({
+      language,
+      score: countMatches(value, pattern) + (strongPattern?.test(value) ? 3 : 0)
+    }))
+    .filter(item => item.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  if (!scores.length) return null;
+  if (scores[1] && scores[0].score === scores[1].score) return null;
+  if (scores[0].language === 'English' && scores[0].score < 2) return null;
+  return scores[0].language;
+}
+
+function normalizeLanguageSample(text) {
+  return String(text || '')
+    .replace(/(^|\n)\s*>.*$/gm, ' ')
+    .replace(/\bOn\s.+?\bwrote:\s.+$/is, ' ')
+    .replace(/\bAm\s.+?\bschrieb\s.+?:\s.+$/is, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function countMatches(value, pattern) {
+  return [...value.matchAll(new RegExp(pattern.source, pattern.flags))].length;
 }
 
 function shippingCountryCode(shopifyContext) {

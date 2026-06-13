@@ -28,6 +28,46 @@ test('uses latest customer message language before shipping country', () => {
   assert.equal(formatResponseLanguageHint(responseLanguage), 'English (source: latest_customer_message, country DE)');
 });
 
+test('does not classify German customer messages as English because of tracking words', () => {
+  const responseLanguage = inferResponseLanguage({
+    latestMessage: 'Hallo, ich habe keine Updates zum Tracking meiner Bestellung. Können Sie mir bitte helfen?',
+    shopifyContext: {
+      selected_order: {
+        shipping_address: {
+          country: 'Germany',
+          country_code: 'DE'
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(responseLanguage, {
+    language: 'German',
+    source: 'latest_customer_message',
+    country_code: 'DE'
+  });
+});
+
+test('falls back to German shipping country when only a single English tracking word is present', () => {
+  const responseLanguage = inferResponseLanguage({
+    latestMessage: 'Tracking?',
+    shopifyContext: {
+      selected_order: {
+        shipping_address: {
+          country: 'Germany',
+          country_code: 'DE'
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(responseLanguage, {
+    language: 'German',
+    source: 'shipping_country',
+    country_code: 'DE'
+  });
+});
+
 test('falls back to shipping country when latest customer message language is unclear', () => {
   const responseLanguage = inferResponseLanguage({
     latestMessage: 'genera respuesta',
