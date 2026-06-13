@@ -5,6 +5,7 @@ export async function getDeliveryEstimateContext({ config, order }) {
   if (!carrier) return null;
 
   const fulfillment = summaryFulfillment(order);
+  const orderCreatedAt = order.created_at || null;
   const fulfilledAt = fulfillment?.created_at || null;
   const deliveredAt = fulfillment?.delivered_at || null;
 
@@ -15,6 +16,7 @@ export async function getDeliveryEstimateContext({ config, order }) {
   const stats = await fetchCarrierStats({ config, carrier });
   return buildDeliveryEstimateContext({
     carrier,
+    orderCreatedAt,
     fulfilledAt,
     deliveredAt,
     stats,
@@ -25,6 +27,7 @@ export async function getDeliveryEstimateContext({ config, order }) {
 
 export function buildDeliveryEstimateContext({
   carrier,
+  orderCreatedAt,
   fulfilledAt,
   deliveredAt,
   stats,
@@ -35,6 +38,7 @@ export function buildDeliveryEstimateContext({
   const fulfilledThreshold = positiveNumber(minFulfilled, 20);
   const deliveredThreshold = positiveNumber(minDelivered, 10);
   const normalizedCarrier = normalizeCarrierName(carrier);
+  const orderDate = parseDate(orderCreatedAt);
   const fulfilledDate = parseDate(fulfilledAt);
   const deliveredDate = parseDate(deliveredAt);
   const fulfilledCount = Number(stats?.fulfilled || 0);
@@ -55,8 +59,10 @@ export function buildDeliveryEstimateContext({
     sample_size: deliveredCount,
     fulfilled_count: fulfilledCount,
     delivered_count: deliveredCount,
+    order_created_at: orderDate?.toISOString() || null,
     fulfilled_at: fulfilledDate.toISOString(),
     delivered_at: deliveredDate?.toISOString() || null,
+    days_since_order: orderDate ? roundDays(daysBetween(orderDate, deliveredDate || now)) : null,
     days_since_fulfillment: roundDays(daysBetween(fulfilledDate, deliveredDate || now)),
     estimated_remaining_days: null,
     confidence: 'low',

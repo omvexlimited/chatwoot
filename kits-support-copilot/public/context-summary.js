@@ -139,9 +139,11 @@ function trackingEstimateRows(estimate) {
   ];
 
   if (estimate.delivered_at) {
+    rows.push({ label: 'Elapsed since order', value: formatDays(estimate.days_since_order) });
     rows.push({ label: 'Transit time', value: formatDays(estimate.days_since_fulfillment) });
   } else {
     rows.push({ label: 'Elapsed since fulfillment', value: formatDays(estimate.days_since_fulfillment) });
+    rows.push({ label: 'Elapsed since order', value: formatDays(estimate.days_since_order) });
     rows.push({ label: 'Estimated remaining', value: formatRemainingDays(estimate.estimated_remaining_days) });
   }
 

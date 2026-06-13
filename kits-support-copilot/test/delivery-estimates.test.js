@@ -15,6 +15,7 @@ test('normalizes frequent carrier names', () => {
 test('builds delivery estimate with remaining days from carrier average', () => {
   const estimate = buildDeliveryEstimateContext({
     carrier: 'Royal Mail',
+    orderCreatedAt: '2026-06-08T00:00:00Z',
     fulfilledAt: '2026-06-10T12:00:00Z',
     now: new Date('2026-06-14T00:00:00Z'),
     stats: {
@@ -30,6 +31,7 @@ test('builds delivery estimate with remaining days from carrier average', () => 
   assert.equal(estimate.carrier, 'Royal Mail');
   assert.equal(estimate.avg_transit_days, 6.2);
   assert.equal(estimate.sample_size, 590);
+  assert.equal(estimate.days_since_order, 6);
   assert.equal(estimate.days_since_fulfillment, 3.5);
   assert.equal(estimate.estimated_remaining_days, 2.7);
   assert.equal(estimate.confidence, 'high');
@@ -39,6 +41,7 @@ test('builds delivery estimate with remaining days from carrier average', () => 
 test('marks shipment over recent average without promising same-day delivery', () => {
   const estimate = buildDeliveryEstimateContext({
     carrier: 'CTT Express',
+    orderCreatedAt: '2026-05-30T00:00:00Z',
     fulfilledAt: '2026-06-01T00:00:00Z',
     now: new Date('2026-06-14T00:00:00Z'),
     stats: {
@@ -59,6 +62,7 @@ test('marks shipment over recent average without promising same-day delivery', (
 test('does not expose estimate when carrier sample is too small', () => {
   const estimate = buildDeliveryEstimateContext({
     carrier: 'UniUni',
+    orderCreatedAt: '2026-06-08T00:00:00Z',
     fulfilledAt: '2026-06-10T12:00:00Z',
     now: new Date('2026-06-14T00:00:00Z'),
     stats: {
@@ -79,6 +83,7 @@ test('does not expose estimate when carrier sample is too small', () => {
 test('uses actual transit time for delivered orders', () => {
   const estimate = buildDeliveryEstimateContext({
     carrier: 'Colissimo',
+    orderCreatedAt: '2026-05-29T00:00:00Z',
     fulfilledAt: '2026-06-01T00:00:00Z',
     deliveredAt: '2026-06-10T12:00:00Z',
     now: new Date('2026-06-14T00:00:00Z'),
@@ -92,6 +97,7 @@ test('uses actual transit time for delivered orders', () => {
   });
 
   assert.equal(estimate.available, true);
+  assert.equal(estimate.days_since_order, 12.5);
   assert.equal(estimate.days_since_fulfillment, 9.5);
   assert.equal(estimate.estimated_remaining_days, 0);
   assert.equal(estimate.reason, 'already_delivered');

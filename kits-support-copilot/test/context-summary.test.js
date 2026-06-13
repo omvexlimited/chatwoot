@@ -54,6 +54,7 @@ test('shows carrier delivery estimate in tracking card when available', () => {
       sample_size: 299,
       fulfilled_count: 364,
       delivered_count: 299,
+      days_since_order: 6.2,
       fulfilled_at: '2026-06-03T10:00:00Z',
       delivered_at: null,
       days_since_fulfillment: 4.2,
@@ -70,6 +71,7 @@ test('shows carrier delivery estimate in tracking card when available', () => {
     'Status',
     'Avg transit',
     'Elapsed since fulfillment',
+    'Elapsed since order',
     'Estimated remaining',
     'Estimate confidence'
   ]);
@@ -79,6 +81,7 @@ test('shows carrier delivery estimate in tracking card when available', () => {
     'FULFILLED',
     '10.7 days',
     '4.2 days',
+    '6.2 days',
     '~6.5 days',
     'high'
   ]);
@@ -92,6 +95,7 @@ test('shows actual transit time for delivered estimate without remaining days', 
       carrier: 'Royal Mail',
       avg_transit_days: 6.2,
       sample_size: 590,
+      days_since_order: 8,
       fulfilled_at: '2026-06-03T10:00:00Z',
       delivered_at: '2026-06-09T10:00:00Z',
       days_since_fulfillment: 6,
@@ -102,6 +106,7 @@ test('shows actual transit time for delivered estimate without remaining days', 
   }));
   const tracking = view.cards.find(card => card.title === 'Tracking');
 
+  assert.equal(tracking.rows.find(row => row.label === 'Elapsed since order').value, '8 days');
   assert.equal(tracking.rows.find(row => row.label === 'Transit time').value, '6 days');
   assert.equal(tracking.rows.some(row => row.label === 'Estimated remaining'), false);
 });
