@@ -76,6 +76,36 @@ test('selects manually chosen order when it belongs to the active email', () => 
   assert.deepEqual(selected.warnings, []);
 });
 
+test('selects trusted internal email fallback order when Shopify email is missing', () => {
+  const orders = [
+    { id: '1', name: '#1947', email: null, fulfillments: [] }
+  ];
+  const selected = selectOrder(
+    orders,
+    { orderRefs: [], trackingNumbers: [] },
+    { contactEmail: 'alvarezlozano.sonia@gmail.com', trustedOrderRefs: ['#1947'] }
+  );
+
+  assert.equal(selected.order.id, '1');
+  assert.match(selected.reason, /kits republic email fallback order #1947/i);
+  assert.deepEqual(selected.warnings, []);
+});
+
+test('keeps multiple trusted internal email fallback orders unselected', () => {
+  const orders = [
+    { id: '1', name: '#1947', email: null, fulfillments: [] },
+    { id: '2', name: '#1950', email: null, fulfillments: [] }
+  ];
+  const selected = selectOrder(
+    orders,
+    { orderRefs: [], trackingNumbers: [] },
+    { contactEmail: 'alvarezlozano.sonia@gmail.com', trustedOrderRefs: ['#1947', '#1950'] }
+  );
+
+  assert.equal(selected.order, null);
+  assert.match(selected.warnings[0], /multiple Shopify orders matched/i);
+});
+
 test('rejects manually chosen order from another active email', () => {
   const orders = [
     { id: '1', name: '#1111', email: 'customer@example.com', fulfillments: [] },

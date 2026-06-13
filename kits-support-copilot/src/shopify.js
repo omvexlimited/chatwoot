@@ -102,6 +102,7 @@ export async function getShopifyContext({ config, contactEmail, text, selectedOr
   }
 
   const orderMap = new Map();
+  const trustedOrderRefs = new Set();
   for (const query of queries) {
     try {
       const orders = await searchOrders({ config, accessToken, query });
@@ -113,8 +114,32 @@ export async function getShopifyContext({ config, contactEmail, text, selectedOr
     }
   }
 
+  const email = normalizeEmail(contactEmail || identifiers.emails[0]);
+  if (shouldRunInternalEmailFallback({ orders: [...orderMap.values()], email })) {
+    try {
+      const internalOrderRefs = await lookupInternalOrderRefsByEmail({ config, email });
+      for (const orderRef of internalOrderRefs) {
+        trustedOrderRefs.add(orderRef);
+        const query = `name:${orderRef}`;
+        if (queries.includes(query)) continue;
+        queries.push(query);
+
+        const orders = await searchOrders({ config, accessToken, query });
+        for (const order of orders) {
+          orderMap.set(order.id, compactOrder(order));
+        }
+      }
+    } catch (error) {
+      warnings.push(`Kits Republic email fallback lookup failed: ${error.message}`);
+    }
+  }
+
   const orders = [...orderMap.values()];
-  const selection = selectOrder(orders, identifiers, { contactEmail, selectedOrderRef });
+  const selection = selectOrder(
+    orders,
+    identifiers,
+    { contactEmail, selectedOrderRef, trustedOrderRefs: [...trustedOrderRefs] }
+  );
   warnings.push(...selection.warnings);
 
   return {
@@ -147,7 +172,11 @@ export function buildShopifyQueries({ contactEmail, identifiers }) {
   return [...new Set(queries)].slice(0, 4);
 }
 
-export function selectOrder(orders, identifiers, { contactEmail = '', selectedOrderRef = '' } = {}) {
+export function selectOrder(orders, identifiers, {
+  contactEmail = '',
+  selectedOrderRef = '',
+  trustedOrderRefs = []
+} = {}) {
   if (orders.length === 0) {
     return {
       order: null,
@@ -156,7 +185,10 @@ export function selectOrder(orders, identifiers, { contactEmail = '', selectedOr
     };
   }
 
-  const eligibleOrders = filterOrdersByContactEmail(orders, contactEmail);
+  const normalizedTrustedOrderRefs = new Set(trustedOrderRefs.map(normalizeOrderRef).filter(Boolean));
+  const emailMatchedOrders = filterOrdersByContactEmail(orders, contactEmail);
+  const trustedOrders = orders.filter(order => normalizedTrustedOrderRefs.has(order.name));
+  const eligibleOrders = uniqueOrders([...emailMatchedOrders, ...trustedOrders]);
   const normalizedSelectedOrderRef = normalizeOrderRef(selectedOrderRef);
   if (contactEmail && !eligibleOrders.length) {
     return {
@@ -222,7 +254,11 @@ export function selectOrder(orders, identifiers, { contactEmail = '', selectedOr
   }
 
   if (eligibleOrders.length === 1) {
-    return { order: eligibleOrders[0], reason: `Only one Shopify order matched.`, warnings: [] };
+    const order = eligibleOrders[0];
+    const reason = normalizedTrustedOrderRefs.has(order.name) && !emailMatchedOrders.some(match => match.id === order.id)
+      ? `Matched Kits Republic email fallback order ${order.name}.`
+      : `Only one Shopify order matched.`;
+    return { order, reason, warnings: [] };
   }
 
   return {
@@ -236,6 +272,53 @@ function filterOrdersByContactEmail(orders, contactEmail) {
   const email = normalizeEmail(contactEmail);
   if (!email) return orders;
   return orders.filter(order => normalizeEmail(order.email || order.customer?.email) === email);
+}
+
+function shouldRunInternalEmailFallback({ orders = [], email = '' }) {
+  if (!email) return false;
+  return !orders.some(order => normalizeEmail(order.email || order.customer?.email) === email);
+}
+
+async function lookupInternalOrderRefsByEmail({ config, email }) {
+  if (!config.krProviderDatabaseUrl) return [];
+
+  const { Client } = await import('pg');
+  const client = new Client({
+    connectionString: config.krProviderDatabaseUrl,
+    ssl: config.krProviderDatabaseSsl ? { rejectUnauthorized: false } : undefined,
+    connectionTimeoutMillis: 3000,
+    query_timeout: 5000
+  });
+
+  try {
+    await client.connect();
+    const result = await client.query(
+      `
+      SELECT order_number
+      FROM kits_republic_orders
+      WHERE store_id = $1
+        AND LOWER(TRIM(COALESCE(customer_email, ''))) = $2
+        AND COALESCE(order_number, '') <> ''
+      ORDER BY shopify_created_at DESC NULLS LAST, id DESC
+      LIMIT 10
+      `,
+      [config.krProviderStoreId || 'kits_republic', normalizeEmail(email)]
+    );
+
+    return [...new Set(result.rows.map(row => normalizeOrderRef(row.order_number)).filter(Boolean))];
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+function uniqueOrders(orders = []) {
+  const seen = new Set();
+  return orders.filter(order => {
+    const key = order.id || order.name;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function searchOrders({ config, accessToken, query }) {
