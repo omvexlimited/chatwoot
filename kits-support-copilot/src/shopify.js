@@ -1,6 +1,8 @@
 import { extractIdentifiers, normalizeOrderRef } from './extract.js';
 import { hasShopifyClientCredentials, shopifyAuthMode } from './config.js';
 
+const ORDER_STATUS_QUERY_SUFFIXES = ['', ' status:open', ' status:closed', ' status:cancelled'];
+
 const ORDER_QUERY = `
 query SearchOrders($query: String!) {
   orders(first: 10, query: $query, sortKey: CREATED_AT, reverse: true) {
@@ -120,13 +122,15 @@ export async function getShopifyContext({ config, contactEmail, text, selectedOr
       const internalOrderRefs = await lookupInternalOrderRefsByEmail({ config, email });
       for (const orderRef of internalOrderRefs) {
         trustedOrderRefs.add(orderRef);
-        const query = `name:${orderRef}`;
-        if (queries.includes(query)) continue;
-        queries.push(query);
+        const fallbackQueries = withOrderStatusQueries(`name:${orderRef}`).filter(query => !queries.includes(query));
 
-        const orders = await searchOrders({ config, accessToken, query });
-        for (const order of orders) {
-          orderMap.set(order.id, compactOrder(order));
+        for (const query of fallbackQueries) {
+          queries.push(query);
+
+          const orders = await searchOrders({ config, accessToken, query });
+          for (const order of orders) {
+            orderMap.set(order.id, compactOrder(order));
+          }
         }
       }
     } catch (error) {
@@ -157,19 +161,23 @@ export function buildShopifyQueries({ contactEmail, identifiers }) {
   const queries = [];
 
   for (const orderRef of identifiers.orderRefs) {
-    queries.push(`name:${orderRef}`);
+    queries.push(...withOrderStatusQueries(`name:${orderRef}`));
   }
 
   for (const tracking of identifiers.trackingNumbers) {
-    queries.push(tracking);
+    queries.push(...withOrderStatusQueries(tracking));
   }
 
   const email = contactEmail || identifiers.emails[0];
   if (email) {
-    queries.push(`email:${email}`);
+    queries.push(...withOrderStatusQueries(`email:${email}`));
   }
 
-  return [...new Set(queries)].slice(0, 4);
+  return [...new Set(queries)].slice(0, 12);
+}
+
+function withOrderStatusQueries(baseQuery) {
+  return ORDER_STATUS_QUERY_SUFFIXES.map(suffix => `${baseQuery}${suffix}`);
 }
 
 export function selectOrder(orders, identifiers, {

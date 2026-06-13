@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extractIdentifiers, normalizeOrderRef } from '../src/extract.js';
-import { selectOrder } from '../src/shopify.js';
+import { buildShopifyQueries, selectOrder } from '../src/shopify.js';
 
 test('extracts emails and explicit order refs', () => {
   const result = extractIdentifiers('My email is Test@Example.com and order #12345 has no tracking.');
@@ -23,6 +23,34 @@ test('extracts localized order refs without requiring hash', () => {
 test('normalizes order refs', () => {
   assert.equal(normalizeOrderRef('1234'), '#1234');
   assert.equal(normalizeOrderRef('#1234'), '#1234');
+});
+
+test('builds Shopify lookup queries that include closed archived orders', () => {
+  const queries = buildShopifyQueries({
+    contactEmail: 'alvarezlozano.sonia@gmail.com',
+    identifiers: { orderRefs: [], trackingNumbers: [], emails: [] }
+  });
+
+  assert.deepEqual(queries, [
+    'email:alvarezlozano.sonia@gmail.com',
+    'email:alvarezlozano.sonia@gmail.com status:open',
+    'email:alvarezlozano.sonia@gmail.com status:closed',
+    'email:alvarezlozano.sonia@gmail.com status:cancelled'
+  ]);
+});
+
+test('builds explicit order lookups that include closed archived orders', () => {
+  const queries = buildShopifyQueries({
+    contactEmail: '',
+    identifiers: { orderRefs: ['#1329'], trackingNumbers: [], emails: [] }
+  });
+
+  assert.deepEqual(queries, [
+    'name:#1329',
+    'name:#1329 status:open',
+    'name:#1329 status:closed',
+    'name:#1329 status:cancelled'
+  ]);
 });
 
 test('selects order by explicit order ref', () => {
