@@ -1,4 +1,4 @@
-const COMMAND_LINK_RE = /(^|[\s([{'""“”‘’])((?:\/newticket(?:\s+(?:approve|cancel))?)|(?:\/forget\s+\d+)|\/help|\/memories)(?=$|[\s.,;:!?)}\]'"“”‘’])/gi;
+const COMMAND_LINK_RE = /(^|[\s([{'""“”‘’])((?:\/remember(?:\s+<text>)?)|(?:\/newticket(?:\s+(?:approve|cancel|<hint>))?)|(?:\/forget(?:\s+(?:\d+|<id>))?)|\/help|\/memories)(?=$|[\s.,;:!?)}\]'"“”‘’])/gi;
 
 export function segmentCommandLinks(text = '') {
   const value = String(text || '');
@@ -10,7 +10,7 @@ export function segmentCommandLinks(text = '') {
     const command = match[2] || '';
     const start = Number(match.index) + prefix.length;
     const end = start + command.length;
-    if (!command || isPlaceholderCommand(value, command, end)) continue;
+    if (!command) continue;
 
     if (start > cursor) segments.push({ type: 'text', text: value.slice(cursor, start) });
     segments.push({ type: 'command', text: command });
@@ -19,9 +19,4 @@ export function segmentCommandLinks(text = '') {
 
   if (cursor < value.length) segments.push({ type: 'text', text: value.slice(cursor) });
   return segments.length ? segments : [{ type: 'text', text: value }];
-}
-
-function isPlaceholderCommand(value, command, end) {
-  if (!['/newticket', '/help', '/memories'].includes(command.toLowerCase())) return false;
-  return /^\s*</.test(value.slice(end));
 }

@@ -20,10 +20,18 @@ test('segments multiple concrete commands', () => {
   assert.deepEqual(commands, ['/newticket cancel', '/memories', '/forget 12', '/help']);
 });
 
-test('does not turn placeholder commands into clickable commands', () => {
-  const segments = segmentCommandLinks('Examples: /remember <text>, /forget <id>, /newticket <hint>.');
+test('segments placeholder commands from help text', () => {
+  const commands = segmentCommandLinks('Examples: /remember <text>, /forget <id>, /newticket <hint>.')
+    .filter(segment => segment.type === 'command')
+    .map(segment => segment.text);
 
-  assert.deepEqual(segments, [
-    { type: 'text', text: 'Examples: /remember <text>, /forget <id>, /newticket <hint>.' }
-  ]);
+  assert.deepEqual(commands, ['/remember <text>', '/forget <id>', '/newticket <hint>']);
+});
+
+test('segments remember command names', () => {
+  const commands = segmentCommandLinks('Use /remember <text> or /remember to save a memory.')
+    .filter(segment => segment.type === 'command')
+    .map(segment => segment.text);
+
+  assert.deepEqual(commands, ['/remember <text>', '/remember']);
 });
