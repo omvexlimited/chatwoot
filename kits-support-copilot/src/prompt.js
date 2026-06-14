@@ -64,7 +64,7 @@ export function buildPrompt({
       'When a general support guide rule conflicts with a specific playbook case, follow the specific playbook case.',
       'For delivered size exchange or sizing preference cases, include the refund policy link, say return shipping is paid by the customer, say returns go to China, and include the 50% coupon code exactly as 6BMDASXWXFS2 when the customer is asking for a size change.',
       'For size exchange policy questions, do not block the answer just because no Shopify order was selected; order details are only needed if the agent will process a return or inspect a specific order.',
-      'For any customer asking for an order update, where their order is, when it will arrive, or how long delivery takes, always include the official timing: processing time is 1-3 days and delivery normally takes 7-15 days from purchase, plus the shipping policy link.',
+      orderUpdateTimingInstruction(),
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
@@ -172,7 +172,7 @@ export function buildCopilotChatPrompt({
       'When a general support guide rule conflicts with a specific playbook case, follow the specific playbook case.',
       'For delivered size exchange or sizing preference cases, include the refund policy link, say return shipping is paid by the customer, say returns go to China, and include the 50% coupon code exactly as 6BMDASXWXFS2 when the customer is asking for a size change.',
       'For size exchange policy questions, do not block the answer just because no Shopify order was selected; order details are only needed if the agent will process a return or inspect a specific order.',
-      'For any customer asking for an order update, where their order is, when it will arrive, or how long delivery takes, always include the official timing: processing time is 1-3 days and delivery normally takes 7-15 days from purchase, plus the shipping policy link.',
+      orderUpdateTimingInstruction(),
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
@@ -264,6 +264,15 @@ function draftLanguageInstruction() {
   ].join(' ');
 }
 
+function orderUpdateTimingInstruction() {
+  return [
+    'For any customer asking for an order update, where their order is, when it will arrive, or how long delivery takes, include official timing and the shipping policy link.',
+    'If the selected order is unfulfilled, still being processed, or has no tracking yet, mention processing time is 1-3 days and delivery normally takes 7-15 days from purchase.',
+    'If the selected order is fulfilled, shipped, or has tracking, do not mention processing time; mention only that delivery normally takes 7-15 days from purchase.',
+    'In customs_pending or tracking-update cases with tracking present, never mention processing time because the order has already moved past preparation.'
+  ].join(' ');
+}
+
 function linkInstruction() {
   return [
     'Use one customer-facing link per topic and never duplicate links.',
@@ -315,16 +324,16 @@ function customsPendingInstruction() {
   return [
     'If Support case type is customs_pending, follow this response structure in the customer language:',
     '1. Use a simple greeting, usually without the customer name, followed by a short thank-you for the email/message.',
-    '2. Say we reviewed the shipment and it is currently in customs inspection/customs clearance.',
+    '2. Say we reviewed the shipment and it is currently going through customs clearance.',
     '3. Explain the local carrier status from Customs context. For CTT, explain that "Pending receipt at CTT Express" / "Pendiente de recepcion en CTT Express" means the label/details were sent to CTT, but CTT has not physically received the parcel yet.',
     '4. For CTT, say this is equivalent to "Pendiente de entrada en red" and, for Kits Republic shipments from China, it usually means the parcel is still before CTT handoff: in China, in flight, in consolidation, or in customs/pre-entry processing.',
     '5. Say this phase is outside our control and, when relevant, customs are experiencing more volume than usual because of the World Cup, so some shipments are delayed.',
-    '6. Say that once customs/pre-entry processing finishes and the parcel is handed to the local carrier, tracking will update automatically and delivery usually happens soon after local carrier handoff.',
+    '6. Say this is normal at this stage, and that once customs clearance is completed and the parcel is handed over to the local carrier, tracking will update automatically.',
     '7. If Delivery timing guidance is usable, add its customer-safe timing reassurance after the customs explanation and before the tracking link. Do not mention exact remaining days.',
     '8. Put "You can follow the shipment here:" or the equivalent in the customer language near the end of the reply, followed by the Kits Republic 17TRACK URL on its own line, immediately before the sign-off.',
     'Prefer this Spanish style for CTT cases: "Hola," then "Muchas gracias por tu correo." then "Hemos revisado tu envio y actualmente se encuentra en inspeccion de aduanas." then explain "Pendiente de recepcion en CTT Express", that CTT has the details but not the physical parcel yet, World Cup customs delays, automatic update after customs release/local handoff, then the tracking link at the end before the sign-off.',
-    'Prefer this English style for no-update Royal Mail cases: "Hi," then "Thank you for your email." then "We have reviewed the shipment and it is currently in customs clearance. This means the parcel has not yet passed the customs check, and once that process is completed, the tracking status will update automatically." then the canonical Kits Republic tracking link at the end before the sign-off.',
-    'Do not say "scanned into their network", "fully received into their network", or similar carrier-network wording. Use normal customer language: customs clearance, customs check, tracking status will update automatically.',
+    'Prefer this English style for no-update Royal Mail cases: "Hi," then "Thank you for your email." then "We have checked your shipment and it is currently going through customs clearance. This is why the tracking may not show many updates yet. This is normal at this stage. Once customs clearance is completed and the parcel is handed over to Royal Mail, the tracking will update automatically." then the official 7-15 days from purchase timeframe if the customer asked about timing/status, then the canonical Kits Republic tracking link at the end before the sign-off.',
+    'Do not say "parcel has not yet passed the customs check", "sender’s end", "sender end", "scanned into their network", "fully received into their network", "network scan", or similar technical wording. Use normal customer language: going through customs clearance, tracking may not show many updates yet, normal at this stage, tracking will update automatically.',
     'Avoid filler and avoid mentioning the order number unless it is necessary to identify the case.',
     'Do not add vague reassurances, do not blame the customer, do not promise an exact delivery date, and do not use the Shopify proxy tracking URL.'
   ].join(' ');

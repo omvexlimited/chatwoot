@@ -60,7 +60,7 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /apology for the inconvenience/);
   assert.match(prompt.system, /em dash character U\+2014/);
   assert.match(prompt.system, /customs_pending/);
-  assert.match(prompt.system, /customs inspection\/customs clearance/);
+  assert.match(prompt.system, /currently going through customs clearance/);
   assert.match(prompt.system, /Delivery estimate rule/);
   assert.match(prompt.system, /Never present it as a promise/);
   assert.match(prompt.system, /Pendiente de recepcion en CTT Express/);
@@ -78,7 +78,8 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /shipping country is only a fallback/);
   assert.match(prompt.system, /do not block the answer just because no Shopify order was selected/);
   assert.match(prompt.system, /For any customer asking for an order update/);
-  assert.match(prompt.system, /processing time is 1-3 days and delivery normally takes 7-15 days from purchase/);
+  assert.match(prompt.system, /If the selected order is unfulfilled/);
+  assert.match(prompt.system, /If the selected order is fulfilled, shipped, or has tracking, do not mention processing time/);
   assert.match(prompt.system, /Never invent completed operational actions/);
   assert.match(prompt.system, /Agent chat messages are trusted operational context/);
   assert.match(prompt.system, /Use one customer-facing link per topic and never duplicate links/);

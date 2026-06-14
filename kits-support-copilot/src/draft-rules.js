@@ -41,6 +41,7 @@ export function enforceDraftRequirements({
   }
 
   normalizedText = enforceDeliveryEstimateClaims(normalizedText, deliveryEstimateContext, language);
+  normalizedText = removeProcessingTimeForShippedOrders(normalizedText, language, shopifyContext);
   normalizedText = ensureOrderStatusTimeframes({
     text: normalizedText,
     language,
@@ -249,14 +250,21 @@ function ensureOrderStatusTimeframes({ text, language, latestMessage, shopifyCon
   if (!shopifyContext?.selected_order) return text;
   if (needsShippingPolicy(text)) return text;
 
-  return insertBeforeSignature(text, orderStatusTimeframeParagraph(language));
+  return insertBeforeSignature(
+    text,
+    orderStatusTimeframeParagraph(language, {
+      includeProcessing: !isShippedOrTrackedOrder(shopifyContext.selected_order)
+    })
+  );
 }
 
 function isOrderStatusQuestion(text = '') {
   return /\b(where\s+is\s+my\s+order|where\s+my\s+order\s+is|order\s+update|update\s+on\s+(?:my\s+)?order|status\s+of\s+(?:my\s+)?order|order\s+status|when\s+will\s+(?:my\s+)?order|when\s+will\s+it\s+arrive|how\s+long\s+(?:will|does)|cu[aá]ndo\s+llega|d[oó]nde\s+est[aá]\s+mi\s+pedido|estado\s+de\s+mi\s+pedido|actualizaci[oó]n\s+de\s+mi\s+pedido|quanto\s+tarda|commande|bestellung|ordine)\b/i.test(text);
 }
 
-function orderStatusTimeframeParagraph(language) {
+function orderStatusTimeframeParagraph(language, { includeProcessing = true } = {}) {
+  if (!includeProcessing) return deliveryOnlyTimeframeParagraph(language);
+
   return copyForLanguage(language, {
     English: 'Our processing time is 1-3 days, and delivery normally takes 7-15 days from purchase.',
     Spanish: 'Nuestro tiempo de preparación es de 1-3 días, y la entrega normalmente tarda 7-15 días desde la compra.',
@@ -266,6 +274,58 @@ function orderStatusTimeframeParagraph(language) {
     Italian: 'Il nostro tempo di preparazione è di 1-3 giorni, e la consegna richiede normalmente 7-15 giorni dall acquisto.',
     Portuguese: 'O nosso tempo de preparação é de 1-3 dias, e a entrega normalmente demora 7-15 dias a partir da compra.',
     Dutch: 'Onze verwerkingstijd is 1-3 dagen, en levering duurt normaal 7-15 dagen vanaf aankoop.'
+  });
+}
+
+function deliveryOnlyTimeframeParagraph(language) {
+  return copyForLanguage(language, {
+    English: 'Delivery normally takes 7-15 days from purchase.',
+    Spanish: 'La entrega normalmente tarda 7-15 días desde la compra.',
+    Catalan: 'L entrega normalment triga 7-15 dies des de la compra.',
+    French: 'La livraison prend normalement 7 à 15 jours à partir de l achat.',
+    German: 'Die Lieferung dauert normalerweise 7-15 Tage ab Kaufdatum.',
+    Italian: 'La consegna richiede normalmente 7-15 giorni dall acquisto.',
+    Portuguese: 'A entrega normalmente demora 7-15 dias a partir da compra.',
+    Dutch: 'Levering duurt normaal 7-15 dagen vanaf aankoop.'
+  });
+}
+
+function removeProcessingTimeForShippedOrders(text, language, shopifyContext = {}) {
+  if (!isShippedOrTrackedOrder(shopifyContext?.selected_order)) return text;
+
+  const deliveryOnly = deliveryOnlyTimeframeParagraph(language);
+  let value = String(text || '');
+  value = value.replace(
+    /\b(?:Our\s+)?processing time is (?:usually\s+)?1-3 days,?\s+and\s+delivery normally takes 7-15 days from purchase\.?/gi,
+    deliveryOnly
+  );
+  value = value.replace(
+    /\bProcessing time is usually 1-3 days,?\s+and\s+delivery normally takes 7-15 days from purchase\.?/gi,
+    deliveryOnly
+  );
+  value = value.replace(
+    /\bOur processing time is 1-3 days\.\s+Delivery normally takes 7-15 days from purchase\.?/gi,
+    deliveryOnly
+  );
+  value = value.replace(
+    /\bOur processing time is 1-3 days\.?/gi,
+    ''
+  );
+  return normalizeBlankLines(value);
+}
+
+function isShippedOrTrackedOrder(order = {}) {
+  if (!order) return false;
+  const fulfillmentStatus = String(order.fulfillment_status || order.display_fulfillment_status || '').toLowerCase();
+  if (['fulfilled', 'partial', 'shipped'].includes(fulfillmentStatus)) return true;
+
+  const fulfillments = Array.isArray(order.fulfillments) ? order.fulfillments : [];
+  return fulfillments.some(fulfillment => {
+    const displayStatus = String(fulfillment?.display_status || '').toLowerCase();
+    if (['fulfilled', 'in_transit', 'delivered', 'confirmed'].includes(displayStatus)) return true;
+    const numbers = Array.isArray(fulfillment?.tracking_numbers) ? fulfillment.tracking_numbers : [];
+    const tracking = Array.isArray(fulfillment?.tracking) ? fulfillment.tracking : [];
+    return numbers.some(Boolean) || tracking.some(item => item?.number);
   });
 }
 

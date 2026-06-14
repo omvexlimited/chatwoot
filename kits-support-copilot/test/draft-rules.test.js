@@ -154,6 +154,89 @@ test('adds official timeframes and shipping policy for order update questions', 
   assert.ok(result.indexOf('Shipping policy:') < result.indexOf('Best regards,'));
 });
 
+test('removes processing time from fulfilled tracking update questions', () => {
+  const draft = [
+    'Hi Mark,',
+    '',
+    'Thank you for your email. We have checked your shipment and it is currently going through customs clearance. This is why the tracking may not show many updates yet.',
+    '',
+    'Our processing time is 1-3 days, and delivery normally takes 7-15 days from purchase.',
+    '',
+    'Shipping policy:',
+    '',
+    'https://kitsrepublic.com/policies/shipping-policy',
+    '',
+    'You can follow the shipment here:',
+    '',
+    'https://kitsrepublic.com/apps/17TRACK?nums=GV501324085GB',
+    '',
+    'Best regards,',
+    '',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    latestMessage: 'Hi, any update on where my order is?',
+    responseLanguage: { language: 'English' },
+    supportCase: { type: 'customs_pending', confidence: 'medium', reasons: ['local_handoff_carrier:Royal Mail'] },
+    shopifyContext: {
+      selected_order: {
+        name: '#1234',
+        fulfillment_status: 'FULFILLED',
+        fulfillments: [
+          {
+            display_status: 'FULFILLED',
+            tracking_numbers: ['GV501324085GB'],
+            tracking: [{ company: 'Royal Mail', number: 'GV501324085GB' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.doesNotMatch(result, /processing time/i);
+  assert.match(result, /Delivery normally takes 7-15 days from purchase\./);
+  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.ok(result.indexOf('This is why the tracking may not show many updates yet.') < result.indexOf('Delivery normally takes 7-15 days from purchase.'));
+  assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('Best regards,'));
+});
+
+test('adds delivery-only timeframe for fulfilled order update questions', () => {
+  const draft = [
+    'Hi Mark,',
+    '',
+    'Thank you for your email. We have checked your shipment and it is currently going through customs clearance.',
+    '',
+    'Best regards,',
+    '',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    latestMessage: 'Hi, any update on where my order is?',
+    responseLanguage: { language: 'English' },
+    supportCase: { type: 'customs_pending', confidence: 'medium', reasons: ['local_handoff_carrier:Royal Mail'] },
+    shopifyContext: {
+      selected_order: {
+        name: '#1234',
+        fulfillment_status: 'FULFILLED',
+        fulfillments: [
+          {
+            tracking_numbers: ['GV501324085GB'],
+            tracking: [{ company: 'Royal Mail', number: 'GV501324085GB' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.doesNotMatch(result, /processing time/i);
+  assert.match(result, /Delivery normally takes 7-15 days from purchase\./);
+  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+});
+
 test('adds refund policy link when returns or exchanges are mentioned', () => {
   const draft = [
     'Hi,',
