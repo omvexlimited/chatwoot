@@ -84,24 +84,47 @@ export default {
       }
 
       const message = this.parseDashboardAppMessage(event.data);
-      if (message?.event !== 'kr-copilot:insert-reply') return;
+      if (
+        message?.event !== 'kr-copilot:insert-reply' &&
+        message?.event !== 'kr-copilot:get-reply-editor-content'
+      ) {
+        return;
+      }
 
       const trustedFrame = this.findTrustedFrame(event);
       if (!trustedFrame) return;
 
-      const draft = String(message.data?.draft || '').trim();
       const requestId = message.data?.requestId;
       const conversationId = message.data?.conversation_id;
       if (!this.isCurrentConversation(conversationId)) {
-        this.postInsertReplyResult(event, {
+        this.postCopilotMessageResult(event, message.event, {
           ok: false,
           requestId,
-          error: 'Conversation changed before the reply could be inserted.',
+          error: 'Conversation changed before the composer action could run.',
         });
         return;
       }
+
+      if (message.event === 'kr-copilot:get-reply-editor-content') {
+        emitter.emit(BUS_EVENTS.GET_REPLY_EDITOR_CONTENT, {
+          conversationId,
+          requestId,
+          onResult: result => {
+            this.postCopilotMessageResult(event, message.event, {
+              requestId,
+              ...result,
+            });
+          },
+        });
+        return;
+      }
+
+      const draft = String(message.data?.draft || '').trim();
       if (!draft) {
-        this.postInsertReplyResult(event, { ok: false, requestId });
+        this.postCopilotMessageResult(event, message.event, {
+          ok: false,
+          requestId,
+        });
         return;
       }
 
@@ -111,7 +134,10 @@ export default {
         policy: message.data?.policy || 'manual',
         requestId,
         onResult: result => {
-          this.postInsertReplyResult(event, { requestId, ...result });
+          this.postCopilotMessageResult(event, message.event, {
+            requestId,
+            ...result,
+          });
         },
       });
     },
@@ -144,12 +170,16 @@ export default {
         }
       });
     },
-    postInsertReplyResult(event, result) {
+    postCopilotMessageResult(event, sourceEvent, result) {
       const targetOrigin =
         event.origin && event.origin !== 'null' ? event.origin : '*';
+      const resultEvent =
+        sourceEvent === 'kr-copilot:get-reply-editor-content'
+          ? 'kr-copilot:get-reply-editor-content-result'
+          : 'kr-copilot:insert-reply-result';
       event.source?.postMessage(
         JSON.stringify({
-          event: 'kr-copilot:insert-reply-result',
+          event: resultEvent,
           data: result,
         }),
         targetOrigin

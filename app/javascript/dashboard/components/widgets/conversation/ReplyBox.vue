@@ -540,6 +540,10 @@ export default {
       BUS_EVENTS.REPLACE_REPLY_EDITOR_CONTENT,
       this.replaceReplyEditorContent
     );
+    emitter.on(
+      BUS_EVENTS.GET_REPLY_EDITOR_CONTENT,
+      this.getReplyEditorContent
+    );
     emitter.on(CMD_AI_ASSIST, this.executeCopilotAction);
   },
   unmounted() {
@@ -550,6 +554,10 @@ export default {
     emitter.off(
       BUS_EVENTS.REPLACE_REPLY_EDITOR_CONTENT,
       this.replaceReplyEditorContent
+    );
+    emitter.off(
+      BUS_EVENTS.GET_REPLY_EDITOR_CONTENT,
+      this.getReplyEditorContent
     );
     emitter.off(
       BUS_EVENTS.NEW_CONVERSATION_MODAL,
@@ -1090,6 +1098,22 @@ export default {
           this.messageEditor?.focusEditorInputField('end');
           finish({ ok: true });
         });
+      });
+    },
+    getReplyEditorContent(payload) {
+      const finish = result => payload?.onResult?.(result);
+      if (!this.isPayloadForCurrentConversation(payload)) {
+        finish({
+          ok: false,
+          error: 'Conversation changed before the composer could be read.',
+        });
+        return;
+      }
+
+      finish({
+        ok: true,
+        content: trimContent(String(this.message || ''), this.maxLength),
+        replyType: this.replyType,
       });
     },
     isPayloadForCurrentConversation(payload) {

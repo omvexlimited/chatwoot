@@ -240,10 +240,11 @@ async function sendAgentMessage(rawMessage) {
   setStatus('Thinking...');
   setBusy(true);
   try {
+    const currentDraft = await draftForAgentMessage(content);
     const result = await api('/api/copilot-chat', {
       ...buildBasePayload(),
       chat_messages: state.chatMessages,
-      current_draft: els.draft.value,
+      current_draft: currentDraft,
       pending_issue: state.pendingIssue
     });
     if (!isCurrentContext({ contextKey, requestId, type: 'chat' })) return;
@@ -274,7 +275,9 @@ async function sendAgentMessage(rawMessage) {
     renderContext(state.contextResult);
     persistSession();
     if (isSidebarLayout && result.draft && !result.skip_insert && !result.preserve_draft) {
-      await autoInsertReply(result.draft);
+      await autoInsertReply(result.draft, {
+        policy: isGrammarCommand(content) ? 'manual' : 'auto'
+      });
     } else {
       setStatus('Ready');
     }
@@ -290,9 +293,23 @@ async function sendAgentMessage(rawMessage) {
   }
 }
 
-async function autoInsertReply(draft) {
+async function draftForAgentMessage(content) {
+  if (!isSidebarLayout || !isGrammarCommand(content)) return els.draft.value;
+
+  const composer = await getReplyEditorContentFromChatwoot();
+  els.draft.value = composer.content || '';
+  persistSession();
+  updateButtons();
+  return els.draft.value;
+}
+
+function isGrammarCommand(content) {
+  return String(content || '').trim().toLowerCase() === '/grammar';
+}
+
+async function autoInsertReply(draft, { policy = 'auto' } = {}) {
   try {
-    await insertReplyInChatwoot(draft, { policy: 'auto' });
+    await insertReplyInChatwoot(draft, { policy });
     hideInsertNotice();
     setStatus('Reply inserted');
   } catch (error) {
@@ -771,6 +788,63 @@ function insertReplyInChatwoot(draft, { policy = 'manual' } = {}) {
           draft,
           requestId,
           policy,
+          conversation_id: buildBasePayload().conversation_id
+        }
+      }),
+      '*'
+    );
+  });
+}
+
+function getReplyEditorContentFromChatwoot() {
+  if (!window.parent || window.parent === window) {
+    return Promise.reject(new Error('Chatwoot parent window is unavailable.'));
+  }
+
+  const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          'KR Copilot could not read the current Chatwoot composer. Grammar was not applied.'
+        )
+      );
+    }, 2000);
+
+    function cleanup() {
+      window.clearTimeout(timeout);
+      window.removeEventListener('message', onMessage);
+    }
+
+    function onMessage(event) {
+      const data = parseMaybeJson(event.data);
+      if (
+        data?.event !== 'kr-copilot:get-reply-editor-content-result' ||
+        data.data?.requestId !== requestId
+      ) {
+        return;
+      }
+
+      cleanup();
+      if (data.data?.ok) {
+        resolve({ content: String(data.data.content || '') });
+      } else {
+        reject(
+          new Error(
+            data.data?.error ||
+              'KR Copilot could not read the current Chatwoot composer. Grammar was not applied.'
+          )
+        );
+      }
+    }
+
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage(
+      JSON.stringify({
+        event: 'kr-copilot:get-reply-editor-content',
+        data: {
+          requestId,
           conversation_id: buildBasePayload().conversation_id
         }
       }),

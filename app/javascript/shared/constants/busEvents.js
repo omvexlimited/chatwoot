@@ -14,4 +14,5 @@ export const BUS_EVENTS = {
   INSERT_INTO_RICH_EDITOR: 'insertIntoRichEditor',
   INSERT_INTO_NORMAL_EDITOR: 'insertIntoNormalEditor',
   REPLACE_REPLY_EDITOR_CONTENT: 'replaceReplyEditorContent',
+  GET_REPLY_EDITOR_CONTENT: 'getReplyEditorContent',
 };
