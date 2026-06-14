@@ -542,6 +542,50 @@ test('removes orphan tracking label after a valid tracking block', () => {
   assert.match(result, /Best,\n\nwww\.kitsrepublic\.com$/);
 });
 
+test('removes French duplicate timeframe and orphan tracking label', () => {
+  const draft = [
+    'Bonjour Samuel,',
+    '',
+    'Merci beaucoup pour votre message.',
+    '',
+    'Votre commande a bien été expédiée. Le délai de livraison est généralement de 7 à 15 jours à compter de la date d’achat.',
+    '',
+    'Vous pouvez suivre votre colis ici :',
+    '',
+    'La livraison prend normalement 7 à 15 jours à partir de l achat.',
+    '',
+    'Vous pouvez suivre l envoi ici:',
+    '',
+    'https://kitsrepublic.com/apps/17TRACK?nums=6A06542422997',
+    '',
+    'Cordialement,',
+    '',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'French' },
+    shopifyContext: {
+      selected_order: {
+        fulfillments: [
+          {
+            tracking_numbers: ['6A06542422997'],
+            tracking: [{ company: 'Colissimo', number: '6A06542422997' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal((result.match(/7 à 15 jours/g) || []).length, 1);
+  assert.doesNotMatch(result, /Vous pouvez suivre votre colis ici/);
+  assert.equal((result.match(/Vous pouvez suivre l envoi ici:/g) || []).length, 1);
+  assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
+  assert.match(result, /Politique de livraison:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Cordialement,\n\nwww\.kitsrepublic\.com$/);
+});
+
 test('keeps the tracking label immediately associated with the canonical link', () => {
   const draft = [
     'Hi,',

@@ -48,6 +48,7 @@ export function enforceDraftRequirements({
     latestMessage,
     shopifyContext
   });
+  normalizedText = dedupeDeliveryTimeframeParagraphs(normalizedText);
   normalizedText = applyRequiredPolicyLinks(normalizedText, language);
   if (trackingUrl) normalizedText = moveTrackingBlockBeforeSignature(normalizedText, trackingUrl, language);
   return normalizeDraftFormatting(normalizedText);
@@ -314,6 +315,33 @@ function removeProcessingTimeForShippedOrders(text, language, shopifyContext = {
   return normalizeBlankLines(value);
 }
 
+function dedupeDeliveryTimeframeParagraphs(text) {
+  const paragraphs = splitParagraphs(text);
+  let hasTimeframe = false;
+
+  const kept = paragraphs.filter(paragraph => {
+    if (!isDeliveryTimeframeParagraph(paragraph)) return true;
+    if (!hasTimeframe) {
+      hasTimeframe = true;
+      return true;
+    }
+    return !isStandaloneDeliveryTimeframeParagraph(paragraph);
+  });
+
+  return normalizeBlankLines(kept.join('\n\n'));
+}
+
+function isDeliveryTimeframeParagraph(paragraph = '') {
+  return /\b7\s*(?:[-–]|à|a|to)\s*15\s+(?:days?|jours?|d[ií]as?|dies|giorni|tage|dagen)\b/i.test(paragraph);
+}
+
+function isStandaloneDeliveryTimeframeParagraph(paragraph = '') {
+  const value = String(paragraph || '').trim();
+  if (value.length > 180) return false;
+  if (/\n\s*https?:\/\//i.test(value)) return false;
+  return /\b(delivery|livraison|entrega|enviament|consegna|lieferung|levering)\b/i.test(value);
+}
+
 function isShippedOrTrackedOrder(order = {}) {
   if (!order) return false;
   const fulfillmentStatus = String(order.fulfillment_status || order.display_fulfillment_status || '').toLowerCase();
@@ -383,13 +411,13 @@ function markLinkBlockForRemoval(lines, index, remove, isLabelLine) {
 }
 
 function isTrackingLabelLine(line = '') {
-  return /\b(follow|track|tracking|shipment|seguimiento|env[ií]o|seguiment|enviament|zending|suivi|sendung|spedizione)\b/i.test(line);
+  return /\b(follow|track|tracking|shipment|seguimiento|env[ií]o|seguiment|enviament|zending|suivi|suivre|colis|sendung|spedizione)\b/i.test(line);
 }
 
 function isStandaloneTrackingLabel(line = '') {
   const value = line.trim();
   if (!/:\s*$/.test(value) || value.length > 90) return false;
-  return /\b(follow|track|tracking|shipment|parcel|seguimiento|env[ií]o|rastrear|seguiment|enviament|zending|trackingnummer|suivi|sendung|spedizione|tracciamento|envoi|livraison)\b/i.test(value);
+  return /\b(follow|track|tracking|shipment|parcel|seguimiento|env[ií]o|rastrear|seguiment|enviament|zending|trackingnummer|suivi|suivre|colis|sendung|spedizione|tracciamento|envoi|livraison)\b/i.test(value);
 }
 
 function nextNonBlankLineIndex(lines, startIndex) {
@@ -476,7 +504,7 @@ function applyRequiredPolicyLinks(text, language) {
 }
 
 function needsShippingPolicy(text) {
-  return /\b(7\s*[–-]\s*15|1\s*[–-]\s*3|delivery timeframe|delivery time(?:s)?|shipping time(?:s)?|shipping policy|processing time|usual delivery timeframe|plazo(?:s)? de entrega|tiempos? de env[ií]o|cu[aá]nto tarda|tardan|d[ií]as desde la compra)\b/i.test(text);
+  return /\b(7\s*(?:[–-]|à|a|to)\s*15|1\s*(?:[–-]|à|a|to)\s*3|delivery timeframe|delivery time(?:s)?|shipping time(?:s)?|shipping policy|processing time|usual delivery timeframe|plazo(?:s)? de entrega|tiempos? de env[ií]o|cu[aá]nto tarda|tardan|d[ií]as desde la compra|d[eé]lai de livraison|livraison)\b/i.test(text);
 }
 
 function needsRefundPolicy(text) {
