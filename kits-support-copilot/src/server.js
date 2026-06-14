@@ -26,6 +26,7 @@ import {
   runNewTicketCommand,
   runPendingTicketFeedback
 } from './new-ticket.js';
+import { runGrammarCommand } from './grammar.js';
 import {
   buildCopilotChatPrompt,
   buildFallbackDraft,
@@ -187,6 +188,38 @@ async function handleCopilotChat(req, res) {
       skipInsert: ticketResult.skip_insert,
       approvedMemories: [],
       pendingIssue: ticketResult.pending_issue ?? null
+    });
+  }
+
+  const grammarResult = await runGrammarCommand({
+    command,
+    config,
+    currentDraft
+  }).catch(error => ({
+    handled: true,
+    assistant_message: `Grammar command failed: ${error.message}`,
+    draft: currentDraft,
+    reasoning_summary: 'KR Copilot grammar command failed.',
+    confidence: 'low',
+    warnings: [error.message],
+    preserve_draft: true,
+    skip_insert: true
+  }));
+
+  if (grammarResult?.handled) {
+    return sendCopilotChatResponse(res, {
+      context,
+      responseContext,
+      assistantMessage: grammarResult.assistant_message,
+      draft: grammarResult.draft ?? currentDraft,
+      reasoningSummary: grammarResult.reasoning_summary,
+      confidence: grammarResult.confidence,
+      warnings: grammarResult.warnings,
+      agentConfirmedFacts,
+      preserveDraft: grammarResult.preserve_draft,
+      skipInsert: grammarResult.skip_insert,
+      approvedMemories: [],
+      pendingIssue
     });
   }
 

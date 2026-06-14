@@ -13,11 +13,11 @@ test('segments assistant text with clickable newticket approve command', () => {
 });
 
 test('segments multiple concrete commands', () => {
-  const commands = segmentCommandLinks('Use /newticket cancel, /memories, /forget 12, or /help.')
+  const commands = segmentCommandLinks('Use /newticket cancel, /memories, /forget 12, /grammar, or /help.')
     .filter(segment => segment.type === 'command')
     .map(segment => segment.text);
 
-  assert.deepEqual(commands, ['/newticket cancel', '/memories', '/forget 12', '/help']);
+  assert.deepEqual(commands, ['/newticket cancel', '/memories', '/forget 12', '/grammar', '/help']);
 });
 
 test('segments placeholder commands from help text', () => {

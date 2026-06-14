@@ -1,4 +1,4 @@
-const COMMAND_LINK_RE = /(^|[\s([{'""“”‘’])((?:\/remember(?:\s+<text>)?)|(?:\/newticket(?:\s+(?:approve|cancel|<hint>))?)|(?:\/forget(?:\s+(?:\d+|<id>))?)|\/help|\/memories)(?=$|[\s.,;:!?)}\]'"“”‘’])/gi;
+const COMMAND_LINK_RE = /(^|[\s([{'""“”‘’])((?:\/remember(?:\s+<text>)?)|(?:\/newticket(?:\s+(?:approve|cancel|<hint>))?)|(?:\/forget(?:\s+(?:\d+|<id>))?)|\/grammar|\/help|\/memories)(?=$|[\s.,;:!?)}\]'"“”‘’])/gi;
 
 export function segmentCommandLinks(text = '') {
   const value = String(text || '');

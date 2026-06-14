@@ -22,6 +22,9 @@ const HELP_TEXT = [
   '/newticket cancel',
   'Discard the current order issue proposal.',
   '',
+  '/grammar',
+  'Correct spelling in the current draft only, without rewriting it.',
+  '',
   '/help',
   'Show this command list.'
 ].join('\n');
@@ -72,6 +75,9 @@ export function parseCopilotCommand(value = '') {
   }
   if (command === '/newticket') {
     return { name: 'newticket', argument };
+  }
+  if (command === '/grammar') {
+    return { name: 'grammar', argument };
   }
   if (command === '/help') {
     return { name: 'help', argument };

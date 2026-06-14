@@ -21,6 +21,7 @@ test('parses copilot memory commands', () => {
     name: 'newticket',
     argument: 'supplier says no stock'
   });
+  assert.deepEqual(parseCopilotCommand('/grammar'), { name: 'grammar', argument: '' });
   assert.deepEqual(parseCopilotCommand('/help'), { name: 'help', argument: '' });
   assert.equal(parseCopilotCommand('normal message'), null);
 });
@@ -79,6 +80,7 @@ test('runs /help without memory database configuration', async () => {
   assert.match(result.assistant_message, /\/remember <text>/);
   assert.match(result.assistant_message, /\/memories/);
   assert.match(result.assistant_message, /\/forget <id>/);
+  assert.match(result.assistant_message, /\/grammar/);
   assert.match(result.assistant_message, /\/help/);
 });
 
