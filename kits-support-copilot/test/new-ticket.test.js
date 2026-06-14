@@ -10,6 +10,7 @@ test('prepares a new ticket proposal from selected order provider and conversati
   const calls = mockFetch(t, async () => openAiResponse({
     action: 'proposal',
     issue_type: 'shipping',
+    affected_line_item_ids: ['gid://shopify/LineItem/111'],
     message: 'Shipping issue for order #2590: customer reports no tracking updates after dispatch; ask supplier to confirm parcel handoff status.',
     confidence: 'high',
     warnings: []
@@ -27,6 +28,8 @@ test('prepares a new ticket proposal from selected order provider and conversati
   assert.equal(result.pending_issue.order_ref, '#2590');
   assert.equal(result.pending_issue.provider_id, 7);
   assert.equal(result.pending_issue.issue_type, 'shipping');
+  assert.deepEqual(result.pending_issue.affected_line_item_ids, ['gid://shopify/LineItem/111']);
+  assert.match(result.assistant_message, /Line item: England 2026 Home Jersey/);
   assert.match(result.pending_issue.message, /customer reports no tracking updates/i);
   assert.match(result.assistant_message, /New issue proposal/);
   assert.match(result.assistant_message, /\/newticket approve/);
@@ -45,6 +48,7 @@ test('uses optional newticket hint with context when OpenAI is unavailable', asy
   assert.equal(result.pending_issue.order_ref, '#2590');
   assert.equal(result.pending_issue.provider_id, 7);
   assert.equal(result.pending_issue.issue_type, 'stock');
+  assert.deepEqual(result.pending_issue.affected_line_item_ids, ['gid://shopify/LineItem/111']);
   assert.match(result.pending_issue.message, /supplier says no stock for XL/i);
 });
 
@@ -192,6 +196,46 @@ test('approves pending ticket through internal admin API', async t => {
   });
 });
 
+test('approves pending ticket with affected line item ids', async t => {
+  const calls = mockFetch(t, async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ ok: true, issue: { id: 23 } })
+  }));
+
+  const result = await runNewTicketCommand({
+    command: parseCopilotCommand('/newticket approve'),
+    config: {
+      kitsAdminBaseUrl: 'https://admin.example.com',
+      kitsInternalApiToken: 'secret'
+    },
+    context: context(),
+    pendingIssue: {
+      order_ref: '#2590',
+      provider_id: 7,
+      provider_label: 'Mign Jin (1)',
+      issue_type: 'missing_size',
+      affected_line_item_ids: ['gid://shopify/LineItem/111'],
+      affected_line_items: [
+        {
+          shopify_line_item_id: 'gid://shopify/LineItem/111',
+          label: 'England 2026 Home Jersey · ENG-HOME-XL'
+        }
+      ],
+      message: 'Missing size issue for order #2590: wrong size received'
+    }
+  });
+
+  assert.equal(result.pending_issue, null);
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    order_ref: '#2590',
+    provider_id: 7,
+    issue_type: 'missing_size',
+    message: 'Missing size issue for order #2590: wrong size received',
+    affected_line_item_ids: ['gid://shopify/LineItem/111']
+  });
+});
+
 function context(overrides = {}) {
   return {
     contactEmail: 'craig@example.com',
@@ -209,6 +253,8 @@ function context(overrides = {}) {
         shipping_address: { country: 'United Kingdom', country_code: 'GB' },
         line_items: [
           {
+            id: 'gid://shopify/LineItem/111',
+            shopify_line_item_id: 'gid://shopify/LineItem/111',
             name: 'England 2026 Home Jersey',
             quantity: 1,
             sku: 'ENG-HOME-XL',

@@ -30,6 +30,7 @@ query SearchOrders($query: String!) {
       }
       lineItems(first: 10) {
         nodes {
+          id
           name
           quantity
           sku
@@ -399,6 +400,8 @@ async function getShopifyAccessToken(config) {
 
 function compactOrder(order) {
   const lineItems = (order.lineItems?.nodes || []).map(item => ({
+    id: item.id,
+    shopify_line_item_id: item.id,
     name: item.name,
     quantity: item.quantity,
     sku: item.sku,

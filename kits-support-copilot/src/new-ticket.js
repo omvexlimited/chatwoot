@@ -69,7 +69,7 @@ export async function revisePendingTicketProposalFromFeedback({ config, context,
   const current = normalizePendingIssue(proposal);
   if (!current) return null;
 
-  const fallbackProposal = reviseIssueProposal({ proposal: current, feedback });
+  const fallbackProposal = reviseIssueProposal({ proposal: current, feedback, context });
   const fallback = ticketResponse(formatProposal(fallbackProposal, context), {
     pendingIssue: fallbackProposal,
     confidence: 'medium'
@@ -105,12 +105,15 @@ export function normalizePendingIssue(value) {
   const issueType = ISSUE_TYPES.includes(value.issue_type) ? value.issue_type : 'other';
   const message = String(value.message || '').trim().slice(0, 2000);
   if (!orderRef || !Number.isInteger(providerId) || providerId <= 0 || !message) return null;
+  const affectedLineItemIds = normalizeAffectedLineItemIds(value.affected_line_item_ids);
   return {
     order_ref: orderRef,
     provider_id: providerId,
     provider_label: String(value.provider_label || '').trim(),
     issue_type: issueType,
     message,
+    affected_line_item_ids: affectedLineItemIds,
+    affected_line_items: normalizeAffectedLineItems(value.affected_line_items, affectedLineItemIds),
     admin_order_url: String(value.admin_order_url || '').trim(),
     updated_at: value.updated_at || new Date().toISOString()
   };
@@ -157,18 +160,21 @@ function buildIssueProposal({ config, context, details }) {
   const order = context.shopifyContext.selected_order;
   const provider = context.providerContext.provider;
   const issueType = detectIssueType(details);
+  const affected = resolveAffectedLineItems({ order, issueType, text: details });
   return {
     order_ref: normalizeOrderRef(order.name),
     provider_id: Number(provider.id),
     provider_label: provider.label || provider.name || provider.code || String(provider.id),
     issue_type: issueType,
     message: buildIssueMessage({ issueType, details, order }),
+    affected_line_item_ids: affected.ids,
+    affected_line_items: affected.items,
     admin_order_url: buildAdminOrderUrl({ config, orderRef: order.name }),
     updated_at: new Date().toISOString()
   };
 }
 
-function reviseIssueProposal({ proposal, feedback }) {
+function reviseIssueProposal({ proposal, feedback, context }) {
   const issueType = detectIssueType(feedback, proposal.issue_type);
   let message = proposal.message;
   if (/\b(urgent|urgente|priority|prioridad)\b/i.test(feedback) && !/^Urgent:/i.test(message)) {
@@ -185,6 +191,7 @@ function reviseIssueProposal({ proposal, feedback }) {
     ...proposal,
     issue_type: issueType,
     message: message.trim().slice(0, 2000),
+    ...resolveRevisionAffectedLineItems({ proposal, feedback, context, issueType }),
     updated_at: new Date().toISOString()
   };
 }
@@ -205,18 +212,23 @@ async function approvePendingIssue({ config, pendingIssue }) {
     });
   }
 
+  const payload = {
+    order_ref: proposal.order_ref,
+    provider_id: proposal.provider_id,
+    issue_type: proposal.issue_type,
+    message: proposal.message
+  };
+  if (proposal.affected_line_item_ids.length) {
+    payload.affected_line_item_ids = proposal.affected_line_item_ids;
+  }
+
   const response = await fetch(`${config.kitsAdminBaseUrl}/internal/kits-republic/issues`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.kitsInternalApiToken}`
     },
-    body: JSON.stringify({
-      order_ref: proposal.order_ref,
-      provider_id: proposal.provider_id,
-      issue_type: proposal.issue_type,
-      message: proposal.message
-    })
+    body: JSON.stringify(payload)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.ok) {
@@ -305,12 +317,13 @@ function buildIssueProposalPrompt({ context, hint = '' }) {
       'You create internal Kits Republic order issue proposals for the supplier/admin team.',
       'Use the selected order, provider, customer email, latest email, conversation, tracking, line items, and optional agent hint.',
       'Do not ask the agent to write the issue details if the context is clear.',
+      'If the issue affects a specific product, choose the matching line item from Selected order.line_items and return affected_line_item_ids with its shopify_line_item_id. Use an empty array only for order-level issues such as address or generic shipping.',
       'If an existing open ticket appears to cover the same issue, warn about it and only propose a new issue if the context clearly needs a separate ticket.',
       'If the issue is not clear from the context and agent hint, return action "clarification" with one short question.',
       'The issue message is internal only, written in English, concise, operational, and suitable for a supplier/admin issue.',
       'Do not write a customer-facing reply. Do not include greeting, sign-off, markdown table, or hidden reasoning.',
       `issue_type must be one of: ${ISSUE_TYPES.join(', ')}.`,
-      'Return strict JSON only: {"action":"proposal","issue_type":"...","message":"...","confidence":"high|medium|low","warnings":[]}.',
+      'Return strict JSON only: {"action":"proposal","issue_type":"...","affected_line_item_ids":["..."],"message":"...","confidence":"high|medium|low","warnings":[]}.',
       'For clarification return strict JSON only: {"action":"clarification","clarification":"...","confidence":"low","warnings":[]}.'
     ].join('\n'),
     user: issuePromptPayload({ context, hint })
@@ -322,10 +335,11 @@ function buildIssueRevisionPrompt({ context, proposal, feedback }) {
     system: [
       'You revise a pending internal Kits Republic order issue proposal from agent feedback.',
       'Keep the same selected order and provider. Apply the agent feedback directly.',
+      'If feedback changes the affected product, update affected_line_item_ids using the selected order line item shopify_line_item_id.',
       'The issue message is internal only, written in English, concise, operational, and suitable for a supplier/admin issue.',
       `issue_type must be one of: ${ISSUE_TYPES.join(', ')}.`,
       'Do not create the issue. Return only the revised proposal JSON.',
-      'Return strict JSON only: {"action":"proposal","issue_type":"...","message":"...","confidence":"high|medium|low","warnings":[]}.'
+      'Return strict JSON only: {"action":"proposal","issue_type":"...","affected_line_item_ids":["..."],"message":"...","confidence":"high|medium|low","warnings":[]}.'
     ].join('\n'),
     user: [
       issuePromptPayload({ context, hint: '' }),
@@ -379,12 +393,26 @@ function normalizeGeneratedProposal({ config, context, generated, baseProposal =
   const message = String(generated.message || '').trim().slice(0, 2000);
   if (!orderRef || !Number.isInteger(providerId) || providerId <= 0 || !message) return null;
   const issueType = ISSUE_TYPES.includes(generated.issue_type) ? generated.issue_type : detectIssueType(message, base.issue_type);
+  const affected = resolveAffectedLineItems({
+    order,
+    issueType,
+    text: [
+      generated.message,
+      JSON.stringify(generated.affected_line_item_ids || []),
+      context?.latestMessage || '',
+      context?.conversationText || ''
+    ].join('\n'),
+    explicitIds: generated.affected_line_item_ids,
+    fallbackIds: base.affected_line_item_ids
+  });
   return {
     order_ref: orderRef,
     provider_id: providerId,
     provider_label: provider?.label || provider?.name || provider?.code || base.provider_label || String(providerId),
     issue_type: issueType,
     message,
+    affected_line_item_ids: affected.ids,
+    affected_line_items: affected.items,
     admin_order_url: buildAdminOrderUrl({ config, orderRef }),
     updated_at: new Date().toISOString()
   };
@@ -399,6 +427,7 @@ function summarizeOrder(order) {
     fulfillment_status: order.fulfillment_status || null,
     shipping_address: order.shipping_address || null,
     line_items: (order.line_items || []).slice(0, 10).map(item => ({
+      shopify_line_item_id: item.shopify_line_item_id || item.id || null,
       name: item.name || null,
       quantity: item.quantity || null,
       sku: item.sku || null,
@@ -428,7 +457,198 @@ function buildIssueMessage({ issueType, details, order }) {
   return `${issueLabel(issueType)} issue for order ${normalizeOrderRef(order.name)}: ${cleanDetails}`;
 }
 
+function resolveRevisionAffectedLineItems({ proposal, feedback, context, issueType }) {
+  const affected = resolveAffectedLineItems({
+    order: context?.shopifyContext?.selected_order,
+    issueType,
+    text: feedback
+  });
+  if (affected.ids.length) {
+    return {
+      affected_line_item_ids: affected.ids,
+      affected_line_items: affected.items
+    };
+  }
+  return {
+    affected_line_item_ids: proposal.affected_line_item_ids || [],
+    affected_line_items: proposal.affected_line_items || []
+  };
+}
+
+function resolveAffectedLineItems({ order, issueType, text = '', explicitIds, fallbackIds } = {}) {
+  const items = normalizeOrderLineItems(order);
+  const byId = new Map(items.map(item => [item.id, item]));
+  const rawExplicit = normalizeAffectedLineItemIds(explicitIds);
+  const explicit = rawExplicit.filter(id => byId.has(id));
+  const hasExplicitIds = explicitIds !== undefined;
+  if (explicit.length || (hasExplicitIds && rawExplicit.length === 0)) {
+    return {
+      ids: explicit,
+      items: explicit.map(id => byId.get(id)).filter(Boolean)
+    };
+  }
+
+  const fallback = normalizeAffectedLineItemIds(fallbackIds).filter(id => byId.has(id));
+  if (fallback.length) {
+    return {
+      ids: fallback,
+      items: fallback.map(id => byId.get(id)).filter(Boolean)
+    };
+  }
+
+  if (!items.length || !isItemIssueType(issueType)) {
+    return { ids: [], items: [] };
+  }
+  if (items.length === 1) {
+    return { ids: [items[0].id], items: [items[0]] };
+  }
+
+  const scored = items
+    .map(item => ({ item, score: scoreLineItemMatch(item, text) }))
+    .filter(result => result.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (!scored.length || (scored[1] && scored[0].score === scored[1].score)) {
+    return { ids: [], items: [] };
+  }
+  return {
+    ids: [scored[0].item.id],
+    items: [scored[0].item]
+  };
+}
+
+function normalizeOrderLineItems(order) {
+  return (Array.isArray(order?.line_items) ? order.line_items : [])
+    .map(item => {
+      const id = String(item?.shopify_line_item_id || item?.id || '').trim();
+      if (!id) return null;
+      const customAttributes = Array.isArray(item.custom_attributes) ? item.custom_attributes : [];
+      const label = lineItemLabel(item);
+      return {
+        id,
+        label,
+        name: String(item.name || item.product_title || '').trim(),
+        sku: String(item.sku || '').trim(),
+        quantity: item.quantity || null,
+        custom_attributes: customAttributes
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeAffectedLineItemIds(value = []) {
+  const raw = Array.isArray(value) ? value : [value];
+  const parsed = [];
+  for (const item of raw) {
+    if (typeof item === 'string' && item.trim().startsWith('[')) {
+      try {
+        const loaded = JSON.parse(item);
+        if (Array.isArray(loaded)) {
+          parsed.push(...loaded);
+          continue;
+        }
+      } catch {
+        // Keep the raw string below.
+      }
+    }
+    if (item && typeof item === 'object') {
+      parsed.push(item.shopify_line_item_id || item.id || item.affected_item_key);
+    } else {
+      parsed.push(item);
+    }
+  }
+  const result = [];
+  const seen = new Set();
+  for (const item of parsed) {
+    const clean = String(item || '').trim();
+    if (clean && !seen.has(clean)) {
+      result.push(clean);
+      seen.add(clean);
+    }
+  }
+  return result;
+}
+
+function normalizeAffectedLineItems(value = [], ids = []) {
+  const items = Array.isArray(value) ? value : [];
+  if (items.length) {
+    return items
+      .map(item => ({
+        id: String(item?.id || item?.shopify_line_item_id || item?.affected_item_key || '').trim(),
+        shopify_line_item_id: String(item?.shopify_line_item_id || item?.id || item?.affected_item_key || '').trim(),
+        label: String(item?.label || lineItemLabel(item) || '').trim(),
+        name: String(item?.name || item?.product_title || '').trim(),
+        sku: String(item?.sku || '').trim(),
+        quantity: item?.quantity || null
+      }))
+      .filter(item => item.shopify_line_item_id || item.id || item.label);
+  }
+  return normalizeAffectedLineItemIds(ids).map(id => ({
+    id,
+    shopify_line_item_id: id,
+    label: id,
+    name: '',
+    sku: '',
+    quantity: null
+  }));
+}
+
+function isItemIssueType(issueType) {
+  return ['stock', 'missing_size', 'customization', 'other'].includes(issueType);
+}
+
+function scoreLineItemMatch(item, text = '') {
+  const haystack = normalizeSearchText(text);
+  if (!haystack) return 0;
+  let score = 0;
+  if (item.sku && haystack.includes(normalizeSearchText(item.sku))) score += 8;
+  const name = normalizeSearchText(item.name || item.label);
+  if (name && haystack.includes(name)) score += 6;
+  const tokens = [
+    ...(item.name || item.label || '').split(/\s+/),
+    item.sku,
+    ...item.custom_attributes.flatMap(attribute => [attribute?.key, attribute?.value])
+  ]
+    .map(normalizeSearchText)
+    .filter(token => token.length >= 3);
+  const seen = new Set();
+  for (const token of tokens) {
+    if (!seen.has(token) && haystack.includes(token)) {
+      score += 1;
+      seen.add(token);
+    }
+  }
+  return score;
+}
+
+function normalizeSearchText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function lineItemLabel(item = {}) {
+  const name = String(item.name || item.product_title || item.label || '').trim();
+  const variant = String(item.variant_title || item.size || '').trim();
+  const sku = String(item.sku || '').trim();
+  const parts = [name || 'Item'];
+  if (variant && !parts[0].includes(variant)) parts.push(variant);
+  if (sku) parts.push(sku);
+  return parts.filter(Boolean).join(' · ');
+}
+
+function formatAffectedLineItemSummary(proposal = {}) {
+  const items = Array.isArray(proposal.affected_line_items) ? proposal.affected_line_items : [];
+  if (items.length) {
+    return items.map(item => item.label || item.name || item.shopify_line_item_id || item.id).filter(Boolean).join(', ');
+  }
+  return normalizeAffectedLineItemIds(proposal.affected_line_item_ids).join(', ');
+}
+
 function formatProposal(proposal, context = {}) {
+  const affectedSummary = formatAffectedLineItemSummary(proposal);
   return [
     ...formatOpenTicketNotice(context),
     'New issue proposal:',
@@ -436,6 +656,7 @@ function formatProposal(proposal, context = {}) {
     `Order: ${proposal.order_ref}`,
     `Provider: ${proposal.provider_label || proposal.provider_id}`,
     `Type: ${proposal.issue_type}`,
+    ...(affectedSummary ? [`Line item: ${affectedSummary}`] : []),
     '',
     'Message:',
     proposal.message,

@@ -74,7 +74,37 @@ function normalizePendingIssue(value) {
     provider_label: String(value.provider_label || '').trim(),
     issue_type: String(value.issue_type || 'other').trim(),
     message,
+    affected_line_item_ids: normalizeStringArray(value.affected_line_item_ids),
+    affected_line_items: normalizeAffectedLineItems(value.affected_line_items),
     admin_order_url: String(value.admin_order_url || '').trim(),
     updated_at: value.updated_at || new Date().toISOString()
   };
+}
+
+function normalizeStringArray(value = []) {
+  const raw = Array.isArray(value) ? value : [value];
+  const result = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const clean = String(item || '').trim();
+    if (clean && !seen.has(clean)) {
+      result.push(clean);
+      seen.add(clean);
+    }
+  }
+  return result;
+}
+
+function normalizeAffectedLineItems(value = []) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => ({
+      id: String(item?.id || item?.shopify_line_item_id || item?.affected_item_key || '').trim(),
+      shopify_line_item_id: String(item?.shopify_line_item_id || item?.id || item?.affected_item_key || '').trim(),
+      label: String(item?.label || item?.name || item?.product_title || '').trim(),
+      name: String(item?.name || item?.product_title || '').trim(),
+      sku: String(item?.sku || '').trim(),
+      quantity: item?.quantity || null
+    }))
+    .filter(item => item.shopify_line_item_id || item.id || item.label);
 }

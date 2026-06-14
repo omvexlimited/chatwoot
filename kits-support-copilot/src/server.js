@@ -596,6 +596,8 @@ function summarizeContext(context) {
 
 function summarizeLineItems(lineItems = []) {
   return (Array.isArray(lineItems) ? lineItems : []).slice(0, 10).map(item => ({
+    id: item.id || item.shopify_line_item_id || null,
+    shopify_line_item_id: item.shopify_line_item_id || item.id || null,
     name: item.name || null,
     quantity: item.quantity || null,
     sku: item.sku || null,

@@ -54,6 +54,8 @@ test('persists normalized chat session data', () => {
       provider_label: 'Mign Jin (1)',
       issue_type: 'stock',
       message: 'Stock issue for order #2222: no stock',
+      affected_line_item_ids: [],
+      affected_line_items: [],
       admin_order_url: '',
       updated_at: loaded.pendingIssue.updated_at
     },
