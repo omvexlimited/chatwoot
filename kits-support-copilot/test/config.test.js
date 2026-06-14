@@ -25,10 +25,10 @@ test('supports Shopify Dev Dashboard client credentials aliases', () => {
   });
 });
 
-test('defaults OpenAI model to gpt-5.4-mini', () => {
+test('defaults OpenAI model to gpt-5.5', () => {
   const config = loadConfig({});
 
-  assert.equal(config.openaiModel, 'gpt-5.4-mini');
+  assert.equal(config.openaiModel, 'gpt-5.5');
 });
 
 test('uses a direct Shopify Admin API token when no client credentials are provided', () => {

@@ -281,7 +281,7 @@ function openAiConfig() {
     kitsAdminBaseUrl: 'https://admin.example.com',
     openaiApiKey: 'openai-secret',
     openaiBaseUrl: 'https://openai.example.com',
-    openaiModel: 'gpt-5.4-mini'
+    openaiModel: 'gpt-5.5'
   };
 }
 

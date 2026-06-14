@@ -13,7 +13,7 @@ export function loadConfig(env = process.env) {
     nodeEnv: envValue(env, ['NODE_ENV'], 'development'),
     copilotApiToken: envValue(env, ['COPILOT_API_TOKEN']),
     openaiApiKey: envValue(env, ['OPENAI_API_KEY']),
-    openaiModel: envValue(env, ['OPENAI_MODEL'], 'gpt-5.4-mini'),
+    openaiModel: envValue(env, ['OPENAI_MODEL'], 'gpt-5.5'),
     openaiBaseUrl,
     copilotDatabaseUrl: envValue(env, ['COPILOT_DATABASE_URL', 'DATABASE_URL']),
     copilotDatabaseSsl: envValue(env, ['COPILOT_DATABASE_SSL', 'DATABASE_SSL'], 'true').toLowerCase() !== 'false',

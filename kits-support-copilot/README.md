@@ -18,7 +18,7 @@ Recommended:
 
 - `COPILOT_API_TOKEN` shared token used by the embedded Dashboard App URL.
 - `COPILOT_DATABASE_URL` for persistent global memory commands. Falls back to `DATABASE_URL`.
-- `OPENAI_MODEL` defaults to `gpt-5.4-mini`.
+- `OPENAI_MODEL` defaults to `gpt-5.5`.
 - `SHOPIFY_API_VERSION` defaults to `2026-04`.
 
 ## Local Run
