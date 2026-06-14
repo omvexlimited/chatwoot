@@ -12,7 +12,8 @@ export function enforceDraftRequirements({
   supportCase,
   shopifyContext = {},
   responseLanguage,
-  deliveryEstimateContext
+  deliveryEstimateContext,
+  latestMessage = ''
 } = {}) {
   const text = String(draft || '').trim();
   if (!text) return String(draft || '');
@@ -40,6 +41,12 @@ export function enforceDraftRequirements({
   }
 
   normalizedText = enforceDeliveryEstimateClaims(normalizedText, deliveryEstimateContext, language);
+  normalizedText = ensureOrderStatusTimeframes({
+    text: normalizedText,
+    language,
+    latestMessage,
+    shopifyContext
+  });
   normalizedText = applyRequiredPolicyLinks(normalizedText, language);
   if (trackingUrl) normalizedText = moveTrackingBlockBeforeSignature(normalizedText, trackingUrl, language);
   return normalizeDraftFormatting(normalizedText);
@@ -235,6 +242,31 @@ function enforceDeliveryEstimateClaims(text, deliveryEstimateContext, language) 
 
   value = value.replace(/\bthe\s+recent\s+carrier\s+average[^.\n]*\.?/gi, '');
   return normalizeBlankLines(value);
+}
+
+function ensureOrderStatusTimeframes({ text, language, latestMessage, shopifyContext }) {
+  if (!isOrderStatusQuestion(latestMessage)) return text;
+  if (!shopifyContext?.selected_order) return text;
+  if (needsShippingPolicy(text)) return text;
+
+  return insertBeforeSignature(text, orderStatusTimeframeParagraph(language));
+}
+
+function isOrderStatusQuestion(text = '') {
+  return /\b(where\s+is\s+my\s+order|where\s+my\s+order\s+is|order\s+update|update\s+on\s+(?:my\s+)?order|status\s+of\s+(?:my\s+)?order|order\s+status|when\s+will\s+(?:my\s+)?order|when\s+will\s+it\s+arrive|how\s+long\s+(?:will|does)|cu[aá]ndo\s+llega|d[oó]nde\s+est[aá]\s+mi\s+pedido|estado\s+de\s+mi\s+pedido|actualizaci[oó]n\s+de\s+mi\s+pedido|quanto\s+tarda|commande|bestellung|ordine)\b/i.test(text);
+}
+
+function orderStatusTimeframeParagraph(language) {
+  return copyForLanguage(language, {
+    English: 'Our processing time is 1-3 days, and delivery normally takes 7-15 days from purchase.',
+    Spanish: 'Nuestro tiempo de preparación es de 1-3 días, y la entrega normalmente tarda 7-15 días desde la compra.',
+    Catalan: 'El nostre temps de preparació és d 1-3 dies, i l entrega normalment triga 7-15 dies des de la compra.',
+    French: 'Notre délai de préparation est de 1 à 3 jours, et la livraison prend normalement 7 à 15 jours à partir de l achat.',
+    German: 'Unsere Bearbeitungszeit beträgt 1-3 Tage, und die Lieferung dauert normalerweise 7-15 Tage ab Kaufdatum.',
+    Italian: 'Il nostro tempo di preparazione è di 1-3 giorni, e la consegna richiede normalmente 7-15 giorni dall acquisto.',
+    Portuguese: 'O nosso tempo de preparação é de 1-3 dias, e a entrega normalmente demora 7-15 dias a partir da compra.',
+    Dutch: 'Onze verwerkingstijd is 1-3 dagen, en levering duurt normaal 7-15 dagen vanaf aankoop.'
+  });
 }
 
 function removeExactTimingClaims(text, guidance, language) {

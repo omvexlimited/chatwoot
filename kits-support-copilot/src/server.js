@@ -125,7 +125,8 @@ async function handleSuggestReply(req, res) {
     supportCase: context.supportCase,
     shopifyContext: context.shopifyContext,
     responseLanguage: context.responseLanguage,
-    deliveryEstimateContext: context.deliveryEstimateContext
+    deliveryEstimateContext: context.deliveryEstimateContext,
+    latestMessage: context.latestMessage
   });
 
   return sendJson(res, 200, {
@@ -271,7 +272,8 @@ async function handleCopilotChat(req, res) {
     supportCase: context.supportCase,
     shopifyContext: context.shopifyContext,
     responseLanguage: effectiveResponseLanguage,
-    deliveryEstimateContext: context.deliveryEstimateContext
+    deliveryEstimateContext: context.deliveryEstimateContext,
+    latestMessage: context.latestMessage
   });
 
   return sendCopilotChatResponse(res, {

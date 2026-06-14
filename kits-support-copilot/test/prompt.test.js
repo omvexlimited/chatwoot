@@ -77,6 +77,8 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /latest incoming customer message first/);
   assert.match(prompt.system, /shipping country is only a fallback/);
   assert.match(prompt.system, /do not block the answer just because no Shopify order was selected/);
+  assert.match(prompt.system, /For any customer asking for an order update/);
+  assert.match(prompt.system, /processing time is 1-3 days and delivery normally takes 7-15 days from purchase/);
   assert.match(prompt.system, /Never invent completed operational actions/);
   assert.match(prompt.system, /Agent chat messages are trusted operational context/);
   assert.match(prompt.system, /Use one customer-facing link per topic and never duplicate links/);

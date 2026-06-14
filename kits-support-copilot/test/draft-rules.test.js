@@ -122,6 +122,38 @@ test('adds shipping policy link when delivery times are mentioned', () => {
   assert.ok(result.indexOf('https://kitsrepublic.com/policies/shipping-policy') < result.indexOf('www.kitsrepublic.com'));
 });
 
+test('adds official timeframes and shipping policy for order update questions', () => {
+  const draft = [
+    'Hi Andrew,',
+    '',
+    'Thank you for your email. I’ve checked your order #2889, and it is currently being processed.',
+    '',
+    'Once it ships, you’ll receive an update with the tracking details automatically.',
+    '',
+    'Best regards,',
+    '',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    latestMessage: 'Hi, Looking for an update on where my order is? Regards Andrew',
+    responseLanguage: { language: 'English' },
+    shopifyContext: {
+      selected_order: {
+        name: '#2889',
+        fulfillment_status: 'UNFULFILLED',
+        fulfillments: []
+      }
+    }
+  });
+
+  assert.match(result, /processing time is 1-3 days/i);
+  assert.match(result, /delivery normally takes 7-15 days from purchase/i);
+  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.ok(result.indexOf('Shipping policy:') < result.indexOf('Best regards,'));
+});
+
 test('adds refund policy link when returns or exchanges are mentioned', () => {
   const draft = [
     'Hi,',
