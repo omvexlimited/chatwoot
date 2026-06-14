@@ -1,4 +1,9 @@
-const COMMAND_LINK_RE = /(^|[\s([{'""“”‘’])((?:\/remember(?:\s+<text>)?)|(?:\/newticket(?:\s+(?:approve|cancel|<hint>))?)|(?:\/forget(?:\s+(?:\d+|<id>))?)|\/grammar|\/help|\/memories)(?=$|[\s.,;:!?)}\]'"“”‘’])/gi;
+import { linkableCommandTexts } from './commands.js';
+
+const COMMAND_LINK_RE = new RegExp(
+  `(^|[\\s([{'""“”‘’])(${linkableCommandTexts().map(commandToRegExp).join('|')})(?=$|[\\s.,;:!?)}\\]'"“”‘’])`,
+  'gi'
+);
 
 export function segmentCommandLinks(text = '') {
   const value = String(text || '');
@@ -19,4 +24,14 @@ export function segmentCommandLinks(text = '') {
 
   if (cursor < value.length) segments.push({ type: 'text', text: value.slice(cursor) });
   return segments.length ? segments : [{ type: 'text', text: value }];
+}
+
+function escapeRegExp(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function commandToRegExp(command = '') {
+  if (command === '/forget <id>') return '\\/forget(?:\\s+(?:\\d+|<id>))';
+  if (command === '/remember <text>') return '\\/remember(?:\\s+<text>)?';
+  return escapeRegExp(command);
 }

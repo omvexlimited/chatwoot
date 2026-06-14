@@ -6,6 +6,11 @@ import {
 } from './session-store.js';
 import { buildContextView } from './context-summary.js';
 import { segmentCommandLinks } from './command-links.js';
+import {
+  filterCommandOptions,
+  getActiveSlashToken,
+  replaceActiveSlashToken
+} from './commands.js';
 
 const SIDEBAR_SPLIT_STORAGE_KEY = 'kr-copilot-sidebar-split-v1';
 const SIDEBAR_SPLIT_LIMITS = {
@@ -21,6 +26,11 @@ const state = {
   lastResult: null,
   pendingIssue: null,
   selectedOrderRef: '',
+  commandMenu: {
+    activeIndex: 0,
+    options: [],
+    token: null
+  },
   splitResize: null,
   token: new URLSearchParams(window.location.search).get('token') || '',
   storageKey: '',
@@ -48,6 +58,7 @@ const els = {
   insertNoticeText: document.getElementById('insertNoticeText'),
   copyLatestButton: document.getElementById('copyLatestButton'),
   chatForm: document.getElementById('chatForm'),
+  commandMenu: document.getElementById('commandMenu'),
   chatInput: document.getElementById('chatInput'),
   newDraftButton: document.getElementById('newDraftButton'),
   sendButton: document.getElementById('sendButton'),
@@ -73,6 +84,19 @@ window.parent?.postMessage('chatwoot-dashboard-app:fetch-info', '*');
 els.chatForm.addEventListener('submit', event => {
   event.preventDefault();
   sendAgentMessage(els.chatInput.value);
+});
+els.chatInput.addEventListener('input', updateCommandMenu);
+els.chatInput.addEventListener('click', updateCommandMenu);
+els.chatInput.addEventListener('keyup', event => {
+  if (['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) return;
+  updateCommandMenu();
+});
+els.chatInput.addEventListener('keydown', handleCommandMenuKeydown);
+els.commandMenu.addEventListener('mousedown', event => {
+  const option = event.target.closest('[data-command-index]');
+  if (!option) return;
+  event.preventDefault();
+  selectCommandMenuOption(Number(option.dataset.commandIndex));
 });
 els.chatLog.addEventListener('click', event => {
   const commandButton = event.target.closest('[data-command]');
@@ -206,6 +230,7 @@ async function sendAgentMessage(rawMessage) {
   hideInsertNotice();
   state.chatMessages.push({ role: 'user', content });
   els.chatInput.value = '';
+  hideCommandMenu();
   renderChat();
   persistSession();
 
@@ -528,6 +553,134 @@ function insertCommandInInput(command = '') {
   input.value = nextValue;
   input.focus();
   input.setSelectionRange(cursor, cursor);
+  hideCommandMenu();
+}
+
+function handleCommandMenuKeydown(event) {
+  if (!isCommandMenuOpen()) {
+    if (event.key !== 'Escape') return;
+    hideCommandMenu();
+    return;
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    hideCommandMenu();
+    return;
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    moveCommandMenuSelection(1);
+    return;
+  }
+
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    moveCommandMenuSelection(-1);
+    return;
+  }
+
+  if (event.key === 'Enter' || event.key === 'Tab') {
+    event.preventDefault();
+    selectCommandMenuOption(state.commandMenu.activeIndex);
+  }
+}
+
+function updateCommandMenu() {
+  if (els.chatInput.disabled) {
+    hideCommandMenu();
+    return;
+  }
+
+  const token = getActiveSlashToken({
+    value: els.chatInput.value,
+    cursor: els.chatInput.selectionStart
+  });
+
+  if (!token) {
+    hideCommandMenu();
+    return;
+  }
+
+  const options = filterCommandOptions(token.query);
+  if (!options.length) {
+    hideCommandMenu();
+    return;
+  }
+
+  const previousToken = state.commandMenu.token?.token || '';
+  const activeIndex = previousToken === token.token ? Math.min(state.commandMenu.activeIndex, options.length - 1) : 0;
+  state.commandMenu = {
+    token,
+    options,
+    activeIndex
+  };
+  renderCommandMenu();
+}
+
+function renderCommandMenu() {
+  els.commandMenu.textContent = '';
+  els.commandMenu.hidden = false;
+
+  state.commandMenu.options.forEach((option, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `commandMenuOption${index === state.commandMenu.activeIndex ? ' active' : ''}`;
+    button.dataset.commandIndex = String(index);
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', index === state.commandMenu.activeIndex ? 'true' : 'false');
+
+    const command = document.createElement('span');
+    command.className = 'commandMenuCommand';
+    command.textContent = option.command;
+
+    const description = document.createElement('span');
+    description.className = 'commandMenuDescription';
+    description.textContent = option.description;
+
+    button.append(command, description);
+    els.commandMenu.append(button);
+  });
+}
+
+function moveCommandMenuSelection(delta) {
+  const count = state.commandMenu.options.length;
+  if (!count) return;
+  state.commandMenu.activeIndex = (state.commandMenu.activeIndex + delta + count) % count;
+  renderCommandMenu();
+}
+
+function selectCommandMenuOption(index) {
+  const option = state.commandMenu.options[index];
+  if (!option) return;
+
+  const input = els.chatInput;
+  const next = replaceActiveSlashToken({
+    value: input.value,
+    selectionStart: input.selectionStart,
+    selectionEnd: input.selectionEnd,
+    command: option.command
+  });
+
+  input.value = next.value;
+  input.focus();
+  input.setSelectionRange(next.cursor, next.cursor);
+  hideCommandMenu();
+}
+
+function hideCommandMenu() {
+  state.commandMenu = {
+    activeIndex: 0,
+    options: [],
+    token: null
+  };
+  els.commandMenu.hidden = true;
+  els.commandMenu.textContent = '';
+}
+
+function isCommandMenuOpen() {
+  return !els.commandMenu.hidden;
 }
 
 async function copyDraft() {
