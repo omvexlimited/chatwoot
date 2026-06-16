@@ -140,6 +140,26 @@ test('selects trusted internal email fallback order when Shopify email is missin
   assert.deepEqual(selected.warnings, []);
 });
 
+test('selects the only email-matched order when an unverified tracking token is present', () => {
+  const orders = [
+    {
+      id: '1',
+      name: '#3067',
+      email: 'jlally1997@hotmail.com',
+      fulfillments: [{ tracking_numbers: ['ZP13684781601'] }]
+    }
+  ];
+  const selected = selectOrder(
+    orders,
+    { orderRefs: [], trackingNumbers: ['JLALLY1997'] },
+    { contactEmail: 'jlally1997@hotmail.com' }
+  );
+
+  assert.equal(selected.order.id, '1');
+  assert.match(selected.reason, /ignored unverified tracking reference/i);
+  assert.match(selected.warnings[0], /email-matched order was selected/i);
+});
+
 test('keeps multiple trusted internal email fallback orders unselected', () => {
   const orders = [
     { id: '1', name: '#1947', email: null, fulfillments: [] },
