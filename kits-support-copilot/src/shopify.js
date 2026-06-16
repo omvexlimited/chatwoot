@@ -199,15 +199,6 @@ export function selectOrder(orders, identifiers, {
   const trustedOrders = orders.filter(order => normalizedTrustedOrderRefs.has(order.name));
   const eligibleOrders = uniqueOrders([...emailMatchedOrders, ...trustedOrders]);
   const normalizedSelectedOrderRef = normalizeOrderRef(selectedOrderRef);
-  if (contactEmail && !eligibleOrders.length) {
-    return {
-      order: null,
-      reason: null,
-      warnings: [
-        `Shopify returned order candidates, but none match the active contact email ${normalizeEmail(contactEmail)}. No order was selected.`
-      ]
-    };
-  }
 
   if (normalizedSelectedOrderRef) {
     const selectedOrder = eligibleOrders.find(order => order.name === normalizedSelectedOrderRef);
@@ -231,26 +222,34 @@ export function selectOrder(orders, identifiers, {
     };
   }
 
-  const byOrderRef = eligibleOrders.find(order => identifiers.orderRefs.includes(order.name));
+  const byOrderRef = orders.find(order => identifiers.orderRefs.includes(order.name));
   if (byOrderRef) {
-    return { order: byOrderRef, reason: `Matched explicit order ${byOrderRef.name}.`, warnings: [] };
+    return {
+      order: byOrderRef,
+      reason: `Matched explicit order ${byOrderRef.name}.`,
+      warnings: emailMismatchWarnings({ order: byOrderRef, contactEmail, matchType: 'order number' })
+    };
   }
   if (identifiers.orderRefs.length) {
     return {
       order: null,
       reason: null,
       warnings: [
-        `Explicit order ${identifiers.orderRefs.join(', ')} did not match the active contact email. No order was selected.`
+        `Explicit order ${identifiers.orderRefs.join(', ')} was not found in Shopify candidates. No order was selected.`
       ]
     };
   }
 
-  const byTracking = eligibleOrders.find(order => {
+  const byTracking = orders.find(order => {
     const numbers = order.fulfillments.flatMap(fulfillment => fulfillment.tracking_numbers);
     return identifiers.trackingNumbers.some(value => numbers.includes(value));
   });
   if (byTracking) {
-    return { order: byTracking, reason: `Matched tracking number on ${byTracking.name}.`, warnings: [] };
+    return {
+      order: byTracking,
+      reason: `Matched tracking number on ${byTracking.name}.`,
+      warnings: emailMismatchWarnings({ order: byTracking, contactEmail, matchType: 'tracking number' })
+    };
   }
   if (identifiers.trackingNumbers.length) {
     if (eligibleOrders.length === 1) {
@@ -271,6 +270,16 @@ export function selectOrder(orders, identifiers, {
     };
   }
 
+  if (contactEmail && !eligibleOrders.length) {
+    return {
+      order: null,
+      reason: null,
+      warnings: [
+        `Shopify returned order candidates, but none match the active contact email ${normalizeEmail(contactEmail)}. No order was selected.`
+      ]
+    };
+  }
+
   if (eligibleOrders.length === 1) {
     const order = eligibleOrders[0];
     const reason = normalizedTrustedOrderRefs.has(order.name) && !emailMatchedOrders.some(match => match.id === order.id)
@@ -286,15 +295,29 @@ export function selectOrder(orders, identifiers, {
   };
 }
 
+function emailMismatchWarnings({ order, contactEmail, matchType }) {
+  if (!contactEmail) return [];
+  if (orderMatchesContactEmail(order, contactEmail)) return [];
+  return [
+    `Order matched by explicit ${matchType}, but the Chatwoot contact email differs from the Shopify order email.`
+  ];
+}
+
 function filterOrdersByContactEmail(orders, contactEmail) {
   const email = normalizeEmail(contactEmail);
   if (!email) return orders;
-  return orders.filter(order => normalizeEmail(order.email || order.customer?.email) === email);
+  return orders.filter(order => orderMatchesContactEmail(order, email));
+}
+
+function orderMatchesContactEmail(order, contactEmail) {
+  const email = normalizeEmail(contactEmail);
+  if (!email) return true;
+  return normalizeEmail(order.email || order.customer?.email) === email;
 }
 
 function shouldRunInternalEmailFallback({ orders = [], email = '' }) {
   if (!email) return false;
-  return !orders.some(order => normalizeEmail(order.email || order.customer?.email) === email);
+  return !orders.some(order => orderMatchesContactEmail(order, email));
 }
 
 async function lookupInternalOrderRefsByEmail({ config, email }) {

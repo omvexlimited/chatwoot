@@ -84,7 +84,7 @@ test('selects order by explicit order ref', () => {
   assert.deepEqual(selected.warnings, []);
 });
 
-test('does not select explicit order refs belonging to a different active email', () => {
+test('selects explicit order refs even when the active email differs', () => {
   const orders = [
     { id: '1', name: '#1196', email: 'adrianxstanca@gmail.com', fulfillments: [] },
     { id: '2', name: '#2026', email: 'pietergreven@gmail.com', fulfillments: [] }
@@ -95,8 +95,9 @@ test('does not select explicit order refs belonging to a different active email'
     { contactEmail: 'adrianxstanca@gmail.com' }
   );
 
-  assert.equal(selected.order, null);
-  assert.match(selected.warnings[0], /explicit order #2026 did not match the active contact email/i);
+  assert.equal(selected.order.id, '2');
+  assert.match(selected.reason, /matched explicit order #2026/i);
+  assert.match(selected.warnings[0], /contact email differs/i);
 });
 
 test('does not select ambiguous multiple email matches', () => {
@@ -158,6 +159,26 @@ test('selects the only email-matched order when an unverified tracking token is 
   assert.equal(selected.order.id, '1');
   assert.match(selected.reason, /ignored unverified tracking reference/i);
   assert.deepEqual(selected.warnings, []);
+});
+
+test('selects explicit tracking refs even when the active email differs', () => {
+  const orders = [
+    {
+      id: '1',
+      name: '#2280',
+      email: 'adam.yaqub123@gmail.com',
+      fulfillments: [{ tracking_numbers: ['GV501781593GB'] }]
+    }
+  ];
+  const selected = selectOrder(
+    orders,
+    { orderRefs: [], trackingNumbers: ['GV501781593GB'] },
+    { contactEmail: 'wwwnasir786@hotmail.co.uk' }
+  );
+
+  assert.equal(selected.order.id, '1');
+  assert.match(selected.reason, /matched tracking number on #2280/i);
+  assert.match(selected.warnings[0], /contact email differs/i);
 });
 
 test('keeps multiple trusted internal email fallback orders unselected', () => {
