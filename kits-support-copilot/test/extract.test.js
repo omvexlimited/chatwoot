@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractIdentifiers, normalizeOrderRef } from '../src/extract.js';
+import { extractIdentifiers, normalizeOrderRef, normalizePhoneCandidates } from '../src/extract.js';
 import { buildShopifyQueries, selectOrder } from '../src/shopify.js';
 
 test('extracts emails and explicit order refs', () => {
@@ -41,6 +41,24 @@ test('extracts real tracking numbers after tracking hints', () => {
   assert.deepEqual(result.trackingNumbers, ['006239005280976987333001']);
 });
 
+test('extracts phone numbers from explicit phone fields with country code variants', () => {
+  const result = extractIdentifiers('Country Code: GB Name: Nasir Email: test@example.com Phone: 07950527911 Body: Hello');
+
+  assert.deepEqual(result.countryCodes, ['GB']);
+  assert.equal(result.phoneNumbers.includes('07950527911'), true);
+  assert.equal(result.phoneNumbers.includes('+447950527911'), true);
+  assert.equal(result.phoneNumbers.includes('447950527911'), true);
+  assert.equal(result.phoneNumbers.includes('7950527911'), true);
+});
+
+test('normalizes Spanish local phone variants', () => {
+  const result = normalizePhoneCandidates('654 91 18 76', 'ES');
+
+  assert.equal(result.includes('654911876'), true);
+  assert.equal(result.includes('+34654911876'), true);
+  assert.equal(result.includes('34654911876'), true);
+});
+
 test('normalizes order refs', () => {
   assert.equal(normalizeOrderRef('1234'), '#1234');
   assert.equal(normalizeOrderRef('#1234'), '#1234');
@@ -72,6 +90,18 @@ test('builds explicit order lookups that include closed archived orders', () => 
     'name:#1329 status:closed',
     'name:#1329 status:cancelled'
   ]);
+});
+
+test('builds phone fallback lookup queries without using phone filter syntax', () => {
+  const queries = buildShopifyQueries({
+    contactEmail: '',
+    identifiers: { orderRefs: [], trackingNumbers: [], phoneNumbers: ['+447950527911', '7950527911'], emails: [] }
+  });
+
+  assert.equal(queries.includes('+447950527911'), true);
+  assert.equal(queries.includes('+447950527911 status:closed'), true);
+  assert.equal(queries.includes('7950527911'), true);
+  assert.equal(queries.some(query => query.startsWith('phone:')), false);
 });
 
 test('selects order by explicit order ref', () => {
@@ -179,6 +209,86 @@ test('selects explicit tracking refs even when the active email differs', () => 
   assert.equal(selected.order.id, '1');
   assert.match(selected.reason, /matched tracking number on #2280/i);
   assert.match(selected.warnings[0], /contact email differs/i);
+});
+
+test('selects phone match only as fallback after email matching fails', () => {
+  const orders = [
+    {
+      id: '1',
+      name: '#2280',
+      email: 'adam.yaqub123@gmail.com',
+      phone: '+447950527911',
+      customer: { phone: '+447950527911' },
+      shipping_address: { country_code: 'GB', phone: '+44 7950 527911' },
+      billing_address: { country_code: 'GB', phone: '+44 7903 842794' },
+      fulfillments: []
+    }
+  ];
+  const selected = selectOrder(
+    orders,
+    { orderRefs: [], trackingNumbers: [], phoneNumbers: normalizePhoneCandidates('07950527911', 'GB') },
+    { contactEmail: 'wwwnasir786@hotmail.co.uk' }
+  );
+
+  assert.equal(selected.order.id, '1');
+  assert.match(selected.reason, /matched phone number on #2280/i);
+  assert.match(selected.warnings[0], /contact email differs/i);
+});
+
+test('keeps exact email match ahead of phone fallback', () => {
+  const orders = [
+    {
+      id: '1',
+      name: '#1001',
+      email: 'customer@example.com',
+      fulfillments: []
+    },
+    {
+      id: '2',
+      name: '#2280',
+      email: 'other@example.com',
+      phone: '+447950527911',
+      shipping_address: { country_code: 'GB', phone: '+44 7950 527911' },
+      fulfillments: []
+    }
+  ];
+  const selected = selectOrder(
+    orders,
+    { orderRefs: [], trackingNumbers: [], phoneNumbers: normalizePhoneCandidates('07950527911', 'GB') },
+    { contactEmail: 'customer@example.com' }
+  );
+
+  assert.equal(selected.order.id, '1');
+  assert.match(selected.reason, /only one Shopify order matched/i);
+});
+
+test('does not select ambiguous multiple phone matches', () => {
+  const orders = [
+    {
+      id: '1',
+      name: '#2280',
+      email: 'one@example.com',
+      phone: '+447950527911',
+      shipping_address: { country_code: 'GB', phone: '+44 7950 527911' },
+      fulfillments: []
+    },
+    {
+      id: '2',
+      name: '#2281',
+      email: 'two@example.com',
+      phone: '+447950527911',
+      shipping_address: { country_code: 'GB', phone: '+44 7950 527911' },
+      fulfillments: []
+    }
+  ];
+  const selected = selectOrder(
+    orders,
+    { orderRefs: [], trackingNumbers: [], phoneNumbers: normalizePhoneCandidates('07950527911', 'GB') },
+    { contactEmail: 'unknown@example.com' }
+  );
+
+  assert.equal(selected.order, null);
+  assert.match(selected.warnings[0], /multiple Shopify orders matched the phone number/i);
 });
 
 test('keeps multiple trusted internal email fallback orders unselected', () => {

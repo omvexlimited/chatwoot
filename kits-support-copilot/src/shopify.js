@@ -1,4 +1,4 @@
-import { extractIdentifiers, normalizeOrderRef } from './extract.js';
+import { extractIdentifiers, normalizeOrderRef, normalizePhoneCandidates } from './extract.js';
 import { hasShopifyClientCredentials, shopifyAuthMode } from './config.js';
 
 const ORDER_STATUS_QUERY_SUFFIXES = ['', ' status:open', ' status:closed', ' status:cancelled'];
@@ -23,10 +23,18 @@ query SearchOrders($query: String!) {
         email
         firstName
         lastName
+        phone
       }
+      phone
       shippingAddress {
         country
         countryCodeV2
+        phone
+      }
+      billingAddress {
+        country
+        countryCodeV2
+        phone
       }
       lineItems(first: 10) {
         nodes {
@@ -60,9 +68,14 @@ query SearchOrders($query: String!) {
 
 let tokenCache = null;
 
-export async function getShopifyContext({ config, contactEmail, text, selectedOrderRef }) {
+export async function getShopifyContext({ config, contactEmail, contactPhone, contactCountryCode, text, selectedOrderRef }) {
   const warnings = [];
-  const identifiers = extractIdentifiers([contactEmail, text].filter(Boolean).join('\n'));
+  const identifiers = extractIdentifiers([
+    contactEmail,
+    contactPhone ? `Phone: ${contactPhone}` : '',
+    contactCountryCode ? `Country Code: ${contactCountryCode}` : '',
+    text
+  ].filter(Boolean).join('\n'));
 
   if (!config.shopifyStoreDomain || (!config.shopifyAdminAccessToken && !hasShopifyClientCredentials(config))) {
     return {
@@ -174,7 +187,11 @@ export function buildShopifyQueries({ contactEmail, identifiers }) {
     queries.push(...withOrderStatusQueries(`email:${email}`));
   }
 
-  return [...new Set(queries)].slice(0, 12);
+  for (const phone of identifiers.phoneNumbers || []) {
+    queries.push(...withOrderStatusQueries(phone));
+  }
+
+  return [...new Set(queries)].slice(0, 32);
 }
 
 function withOrderStatusQueries(baseQuery) {
@@ -196,6 +213,7 @@ export function selectOrder(orders, identifiers, {
 
   const normalizedTrustedOrderRefs = new Set(trustedOrderRefs.map(normalizeOrderRef).filter(Boolean));
   const emailMatchedOrders = filterOrdersByContactEmail(orders, contactEmail);
+  const phoneMatchedOrders = filterOrdersByPhone(orders, identifiers.phoneNumbers);
   const trustedOrders = orders.filter(order => normalizedTrustedOrderRefs.has(order.name));
   const eligibleOrders = uniqueOrders([...emailMatchedOrders, ...trustedOrders]);
   const normalizedSelectedOrderRef = normalizeOrderRef(selectedOrderRef);
@@ -227,7 +245,7 @@ export function selectOrder(orders, identifiers, {
     return {
       order: byOrderRef,
       reason: `Matched explicit order ${byOrderRef.name}.`,
-      warnings: emailMismatchWarnings({ order: byOrderRef, contactEmail, matchType: 'order number' })
+      warnings: emailMismatchWarnings({ order: byOrderRef, contactEmail, matchType: 'explicit order number' })
     };
   }
   if (identifiers.orderRefs.length) {
@@ -248,7 +266,7 @@ export function selectOrder(orders, identifiers, {
     return {
       order: byTracking,
       reason: `Matched tracking number on ${byTracking.name}.`,
-      warnings: emailMismatchWarnings({ order: byTracking, contactEmail, matchType: 'tracking number' })
+      warnings: emailMismatchWarnings({ order: byTracking, contactEmail, matchType: 'explicit tracking number' })
     };
   }
   if (identifiers.trackingNumbers.length) {
@@ -270,6 +288,33 @@ export function selectOrder(orders, identifiers, {
     };
   }
 
+  if (eligibleOrders.length === 1) {
+    const order = eligibleOrders[0];
+    const reason = normalizedTrustedOrderRefs.has(order.name) && !emailMatchedOrders.some(match => match.id === order.id)
+      ? `Matched Kits Republic email fallback order ${order.name}.`
+      : `Only one Shopify order matched.`;
+    return { order, reason, warnings: [] };
+  }
+
+  if (phoneMatchedOrders.length === 1) {
+    const order = phoneMatchedOrders[0];
+    return {
+      order,
+      reason: `Matched phone number on ${order.name}.`,
+      warnings: emailMismatchWarnings({ order, contactEmail, matchType: 'phone number' })
+    };
+  }
+
+  if (phoneMatchedOrders.length > 1) {
+    return {
+      order: null,
+      reason: null,
+      warnings: [
+        'Multiple Shopify orders matched the phone number and no explicit order/tracking reference was found. Ask the customer to confirm the order number.'
+      ]
+    };
+  }
+
   if (contactEmail && !eligibleOrders.length) {
     return {
       order: null,
@@ -278,14 +323,6 @@ export function selectOrder(orders, identifiers, {
         `Shopify returned order candidates, but none match the active contact email ${normalizeEmail(contactEmail)}. No order was selected.`
       ]
     };
-  }
-
-  if (eligibleOrders.length === 1) {
-    const order = eligibleOrders[0];
-    const reason = normalizedTrustedOrderRefs.has(order.name) && !emailMatchedOrders.some(match => match.id === order.id)
-      ? `Matched Kits Republic email fallback order ${order.name}.`
-      : `Only one Shopify order matched.`;
-    return { order, reason, warnings: [] };
   }
 
   return {
@@ -299,7 +336,7 @@ function emailMismatchWarnings({ order, contactEmail, matchType }) {
   if (!contactEmail) return [];
   if (orderMatchesContactEmail(order, contactEmail)) return [];
   return [
-    `Order matched by explicit ${matchType}, but the Chatwoot contact email differs from the Shopify order email.`
+    `Order matched by ${matchType}, but the Chatwoot contact email differs from the Shopify order email.`
   ];
 }
 
@@ -309,10 +346,34 @@ function filterOrdersByContactEmail(orders, contactEmail) {
   return orders.filter(order => orderMatchesContactEmail(order, email));
 }
 
+function filterOrdersByPhone(orders, phoneNumbers = []) {
+  const expectedPhones = new Set(phoneNumbers || []);
+  if (!expectedPhones.size) return [];
+  return orders.filter(order => orderMatchesPhone(order, expectedPhones));
+}
+
 function orderMatchesContactEmail(order, contactEmail) {
   const email = normalizeEmail(contactEmail);
   if (!email) return true;
   return normalizeEmail(order.email || order.customer?.email) === email;
+}
+
+function orderMatchesPhone(order, expectedPhones) {
+  const countryCode = order.shipping_address?.country_code || order.billing_address?.country_code || '';
+  for (const phone of orderPhoneValues(order)) {
+    const candidates = normalizePhoneCandidates(phone, countryCode);
+    if (candidates.some(candidate => expectedPhones.has(candidate))) return true;
+  }
+  return false;
+}
+
+function orderPhoneValues(order = {}) {
+  return [
+    order.phone,
+    order.customer?.phone,
+    order.shipping_address?.phone,
+    order.billing_address?.phone
+  ].filter(Boolean);
 }
 
 function shouldRunInternalEmailFallback({ orders = [], email = '' }) {
@@ -445,12 +506,14 @@ function compactOrder(order) {
     id: order.id,
     name: order.name,
     email: order.email || order.customer?.email || null,
+    phone: order.phone || order.customer?.phone || null,
     created_at: order.createdAt,
     financial_status: order.displayFinancialStatus,
     fulfillment_status: order.displayFulfillmentStatus,
     total: money(order.currentTotalPriceSet || order.totalPriceSet),
     customer: compactCustomer(order.customer),
     shipping_address: compactShippingAddress(order.shippingAddress),
+    billing_address: compactAddress(order.billingAddress),
     line_items: lineItems,
     fulfillments: (order.fulfillments || []).map(fulfillment => ({
       name: fulfillment.name,
@@ -482,15 +545,21 @@ function compactCustomer(customer) {
   return {
     email: customer.email,
     first_name: customer.firstName,
-    last_name: customer.lastName
+    last_name: customer.lastName,
+    phone: customer.phone || null
   };
 }
 
 function compactShippingAddress(address) {
+  return compactAddress(address);
+}
+
+function compactAddress(address) {
   if (!address) return null;
   return {
     country: address.country || null,
-    country_code: address.countryCodeV2 || null
+    country_code: address.countryCodeV2 || null,
+    phone: address.phone || null
   };
 }
 

@@ -411,10 +411,16 @@ async function prepareConversationContext(body) {
   const conversationText = conversationToText(messages);
   const contact = body.contact || body.conversation?.meta?.sender || {};
   const contactEmail = body.contact_email || contact.email || '';
+  const contactPhone = body.contact_phone || contact.phone || contact.phone_number
+    || contact.additional_attributes?.phone_number || contact.additional_attributes?.phone || '';
+  const contactCountryCode = body.country_code || contact.country_code
+    || contact.additional_attributes?.country_code || contact.additional_attributes?.country || '';
 
   const shopifyContext = await getShopifyContext({
     config,
     contactEmail,
+    contactPhone,
+    contactCountryCode,
     text: [latestMessage, conversationText].join('\n'),
     selectedOrderRef: body.selected_order_ref
   });
@@ -471,6 +477,7 @@ async function prepareConversationContext(body) {
     conversationId,
     displayId: body.conversation?.display_id || conversationId,
     contactEmail,
+    contactPhone,
     latestMessage,
     conversationText,
     messageCount: messages.length,
@@ -532,6 +539,7 @@ function contextPayload(context) {
     conversation_id: context.conversationId,
     display_id: context.displayId,
     contact_email: context.contactEmail,
+    contact_phone: context.contactPhone || null,
     latest_message: context.latestMessage,
     message_count: context.messageCount,
     chatwoot_available: context.chatwootAvailable,
