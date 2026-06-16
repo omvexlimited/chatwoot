@@ -258,9 +258,7 @@ export function selectOrder(orders, identifiers, {
       return {
         order,
         reason: `Only one Shopify order matched; ignored unverified tracking reference.`,
-        warnings: [
-          `Tracking reference ${identifiers.trackingNumbers.join(', ')} did not match ${order.name}, so the email-matched order was selected.`
-        ]
+        warnings: []
       };
     }
 

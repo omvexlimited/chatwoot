@@ -157,7 +157,7 @@ test('selects the only email-matched order when an unverified tracking token is 
 
   assert.equal(selected.order.id, '1');
   assert.match(selected.reason, /ignored unverified tracking reference/i);
-  assert.match(selected.warnings[0], /email-matched order was selected/i);
+  assert.deepEqual(selected.warnings, []);
 });
 
 test('keeps multiple trusted internal email fallback orders unselected', () => {
