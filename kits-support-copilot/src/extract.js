@@ -7,28 +7,29 @@ const NEARBY_TRACKING_VALUE_RE = /\b([A-Z0-9][A-Z0-9-]{7,34})\b/gi;
 
 export function extractIdentifiers(text = '') {
   const emails = uniqueMatches(text, EMAIL_RE).map(v => v.toLowerCase());
+  const searchableText = maskEmailAddresses(text);
   const orderRefs = new Set();
   const trackingNumbers = new Set();
 
-  for (const match of text.matchAll(HASH_ORDER_RE)) {
+  for (const match of searchableText.matchAll(HASH_ORDER_RE)) {
     orderRefs.add(normalizeOrderRef(match[1]));
   }
 
-  for (const match of text.matchAll(ORDER_WORD_RE)) {
+  for (const match of searchableText.matchAll(ORDER_WORD_RE)) {
     orderRefs.add(normalizeOrderRef(match[1]));
   }
 
-  for (const match of text.matchAll(ORDER_PREFIX_RE)) {
+  for (const match of searchableText.matchAll(ORDER_PREFIX_RE)) {
     const value = normalizeOrderRef(match[1]);
     orderRefs.add(value);
   }
 
-  for (const match of text.matchAll(TRACKING_HINT_RE)) {
+  for (const match of searchableText.matchAll(TRACKING_HINT_RE)) {
     const trackingNumber = normalizeTrackingNumber(match[1]);
     if (isLikelyTrackingNumber(trackingNumber)) {
       trackingNumbers.add(trackingNumber);
     } else {
-      const nearbyTrackingNumber = findNearbyTrackingNumber(text, match);
+      const nearbyTrackingNumber = findNearbyTrackingNumber(searchableText, match);
       if (nearbyTrackingNumber) {
         trackingNumbers.add(nearbyTrackingNumber);
       }
@@ -40,6 +41,10 @@ export function extractIdentifiers(text = '') {
     orderRefs: [...orderRefs],
     trackingNumbers: [...trackingNumbers]
   };
+}
+
+function maskEmailAddresses(text = '') {
+  return String(text || '').replace(EMAIL_RE, ' ');
 }
 
 export function normalizeOrderRef(value = '') {

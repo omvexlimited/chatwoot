@@ -25,6 +25,17 @@ test('does not treat normal words after tracking as tracking numbers', () => {
   assert.deepEqual(result.trackingNumbers, []);
 });
 
+test('does not treat email local parts near tracking hints as tracking numbers', () => {
+  const result = extractIdentifiers([
+    "You received a new message from your online store's contact form.",
+    'Email: jlally1997@hotmail.com',
+    'Body: Hi, I placed an order Saturday but haven’t received a confirmation email with any tracking information?'
+  ].join(' '));
+
+  assert.deepEqual(result.emails, ['jlally1997@hotmail.com']);
+  assert.deepEqual(result.trackingNumbers, []);
+});
+
 test('extracts real tracking numbers after tracking hints', () => {
   const result = extractIdentifiers('Tracking indicado: 006239005280976987333001.');
   assert.deepEqual(result.trackingNumbers, ['006239005280976987333001']);
