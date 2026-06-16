@@ -219,23 +219,20 @@ export function selectOrder(orders, identifiers, {
   const normalizedSelectedOrderRef = normalizeOrderRef(selectedOrderRef);
 
   if (normalizedSelectedOrderRef) {
-    const selectedOrder = eligibleOrders.find(order => order.name === normalizedSelectedOrderRef);
+    const selectedOrder = orders.find(order => order.name === normalizedSelectedOrderRef);
     if (selectedOrder) {
       return {
         order: selectedOrder,
         reason: `Agent selected order ${selectedOrder.name}.`,
-        warnings: []
+        warnings: emailMismatchWarnings({ order: selectedOrder, contactEmail, matchType: 'selected order' })
       };
     }
 
-    const existsForAnotherContact = orders.some(order => order.name === normalizedSelectedOrderRef);
     return {
       order: null,
       reason: null,
       warnings: [
-        existsForAnotherContact
-          ? `Selected order ${normalizedSelectedOrderRef} did not match the active contact email. No order was selected.`
-          : `Selected order ${normalizedSelectedOrderRef} was not found in Shopify candidates. No order was selected.`
+        `Selected order ${normalizedSelectedOrderRef} was not found in Shopify candidates. No order was selected.`
       ]
     };
   }

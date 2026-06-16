@@ -306,7 +306,7 @@ test('keeps multiple trusted internal email fallback orders unselected', () => {
   assert.match(selected.warnings[0], /multiple Shopify orders matched/i);
 });
 
-test('rejects manually chosen order from another active email', () => {
+test('keeps manually chosen order even when the active email differs', () => {
   const orders = [
     { id: '1', name: '#1111', email: 'customer@example.com', fulfillments: [] },
     { id: '2', name: '#2222', email: 'other@example.com', fulfillments: [] }
@@ -317,6 +317,7 @@ test('rejects manually chosen order from another active email', () => {
     { contactEmail: 'customer@example.com', selectedOrderRef: '#2222' }
   );
 
-  assert.equal(selected.order, null);
-  assert.match(selected.warnings[0], /selected order #2222 did not match the active contact email/i);
+  assert.equal(selected.order.id, '2');
+  assert.match(selected.reason, /agent selected order #2222/i);
+  assert.match(selected.warnings[0], /contact email differs/i);
 });
