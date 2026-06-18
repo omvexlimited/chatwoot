@@ -83,6 +83,7 @@ test('builds the context payload from a prepared draft row', () => {
     contact_email: 'customer@example.com',
     webhook_payload: {
       content: 'Order number 2280 has it been dispatched',
+      content_attributes: { email: { subject: 'Commande #2280' } },
       conversation: { id: 204, display_id: 204 },
       sender: { email: 'customer@example.com', phone_number: '07950527911' }
     }
@@ -93,6 +94,7 @@ test('builds the context payload from a prepared draft row', () => {
   assert.equal(payload.contact_email, 'customer@example.com');
   assert.equal(payload.contact_phone, '07950527911');
   assert.equal(payload.latest_message, 'Order number 2280 has it been dispatched');
+  assert.equal(payload.latest_subject, 'Commande #2280');
 });
 
 test('stores prepared draft jobs in memory when database is not configured', async () => {

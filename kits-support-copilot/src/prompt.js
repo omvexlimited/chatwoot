@@ -500,7 +500,7 @@ export function conversationToText(messages = []) {
     .map(message => {
       const type = normalizeMessageType(message.message_type);
       const sender = message.sender?.name || message.sender?.email || type;
-      const content = stripHtml(message.content || '');
+      const content = messageTextWithSubject(message);
       return `${type.toUpperCase()} ${sender}: ${content}`;
     })
     .filter(line => line.trim())
@@ -508,8 +508,45 @@ export function conversationToText(messages = []) {
 }
 
 export function latestIncomingMessage(messages = []) {
-  const incoming = [...messages].reverse().find(message => normalizeMessageType(message.message_type) === 'incoming' && message.content);
-  return stripHtml(incoming?.content || '');
+  const incoming = [...messages].reverse().find(message => {
+    return normalizeMessageType(message.message_type) === 'incoming' && (message.content || messageSubject(message));
+  });
+  return messageTextWithSubject(incoming);
+}
+
+export function messageTextWithSubject(message = {}) {
+  if (!message) return '';
+  return prependSubjectToText(stripHtml(message.content || ''), messageSubject(message));
+}
+
+export function prependSubjectToText(text = '', subject = '') {
+  const cleanText = stripHtml(text);
+  const cleanSubject = stripHtml(subject);
+  if (!cleanSubject) return cleanText;
+  if (cleanText.includes(cleanSubject)) return cleanText;
+  return [`Subject: ${cleanSubject}`, cleanText].filter(Boolean).join('\n\n');
+}
+
+export function messageSubject(message = {}) {
+  const contentAttributes = message.content_attributes || message.contentAttributes || {};
+  const additionalAttributes = message.additional_attributes || message.additionalAttributes || {};
+  const conversationAttributes = message.conversation?.additional_attributes
+    || message.conversation?.additionalAttributes
+    || {};
+
+  return stripHtml(
+    message.subject
+    || contentAttributes.email?.subject
+    || contentAttributes.email?.mail_subject
+    || contentAttributes.subject
+    || contentAttributes.email_subject
+    || contentAttributes.mail_subject
+    || additionalAttributes.mail_subject
+    || additionalAttributes.subject
+    || conversationAttributes.mail_subject
+    || conversationAttributes.subject
+    || ''
+  );
 }
 
 function normalizeMessageType(type) {

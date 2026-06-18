@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildCopilotChatPrompt, loadKnowledgeBase } from '../src/prompt.js';
+import {
+  buildCopilotChatPrompt,
+  conversationToText,
+  latestIncomingMessage,
+  loadKnowledgeBase
+} from '../src/prompt.js';
 
 test('loads base guide and Kits Republic playbook into knowledge base', async () => {
   const knowledgeBase = await loadKnowledgeBase();
@@ -23,6 +28,29 @@ test('loads base guide and Kits Republic playbook into knowledge base', async ()
   assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/policies\/privacy-policy/);
   assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/pages\/size-guide/);
   assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/pages\/faq-help-center/);
+});
+
+test('includes email subject in conversation text and latest incoming message', () => {
+  const messages = [
+    {
+      message_type: 'incoming',
+      sender: { email: 'remydeprez0@gmail.com' },
+      content: "Bonjour, a ce jour je n'ai toujours pas recu ma commande.",
+      content_attributes: {
+        email: {
+          subject: 'Commande #2196'
+        }
+      }
+    }
+  ];
+
+  const latest = latestIncomingMessage(messages);
+  const conversation = conversationToText(messages);
+
+  assert.match(latest, /Subject: Commande #2196/);
+  assert.match(latest, /Bonjour/);
+  assert.match(conversation, /Subject: Commande #2196/);
+  assert.match(conversation, /#2196/);
 });
 
 test('builds iterative chat prompt with current draft and chat history', () => {

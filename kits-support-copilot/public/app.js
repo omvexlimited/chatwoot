@@ -651,6 +651,7 @@ function buildBasePayload() {
     contact_phone: contact.phone_number || contact.phone || contact.additional_attributes?.phone_number || contact.additional_attributes?.phone,
     country_code: contact.country_code || contact.additional_attributes?.country_code || contact.additional_attributes?.country,
     latest_message: stripHtml(latestMessage?.content || ''),
+    latest_subject: messageSubject(latestMessage) || messageSubject(conversation),
     latest_message_id: latestMessage?.id || '',
     agent_email: state.appContext?.currentAgent?.email,
     conversation
@@ -1132,6 +1133,28 @@ function latestIncomingMessageRecord(messages) {
   return [...messages].reverse().find(message => {
     return (message.message_type === 0 || message.message_type === '0' || message.message_type === 'incoming') && message.content;
   }) || null;
+}
+
+function messageSubject(message = {}) {
+  const contentAttributes = message?.content_attributes || message?.contentAttributes || {};
+  const additionalAttributes = message?.additional_attributes || message?.additionalAttributes || {};
+  const conversationAttributes = message?.conversation?.additional_attributes
+    || message?.conversation?.additionalAttributes
+    || {};
+
+  return stripHtml(
+    message?.subject
+    || contentAttributes.email?.subject
+    || contentAttributes.email?.mail_subject
+    || contentAttributes.subject
+    || contentAttributes.email_subject
+    || contentAttributes.mail_subject
+    || additionalAttributes.mail_subject
+    || additionalAttributes.subject
+    || conversationAttributes.mail_subject
+    || conversationAttributes.subject
+    || ''
+  );
 }
 
 function stripHtml(value) {

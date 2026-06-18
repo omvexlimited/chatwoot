@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { messageSubject } from './prompt.js';
 
 const ACTIVE_STATUSES = ['pending', 'processing', 'generated'];
 const WEBHOOK_MAX_AGE_SECONDS = 10 * 60;
@@ -239,6 +240,7 @@ export function buildPreparedDraftPayload(row = {}) {
     contact_email: row.contact_email || sender.email,
     contact_phone: sender.phone_number || sender.phone || '',
     latest_message: payload.content || '',
+    latest_subject: messageSubject(payload) || messageSubject(conversation),
     conversation,
     contact: sender
   };

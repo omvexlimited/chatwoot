@@ -46,7 +46,8 @@ import {
   buildPrompt,
   conversationToText,
   latestIncomingMessage,
-  loadKnowledgeBase
+  loadKnowledgeBase,
+  prependSubjectToText
 } from './prompt.js';
 import { generateChatWithOpenAI, generateDraftWithOpenAI } from './openai.js';
 
@@ -478,7 +479,11 @@ async function prepareConversationContext(body) {
   }));
 
   const messages = chatwootResult.messages.length ? chatwootResult.messages : fallbackMessages;
-  const latestMessage = latestIncomingMessage(messages) || body.latest_message || '';
+  const fallbackLatestMessage = prependSubjectToText(body.latest_message || '', body.latest_subject || '');
+  const chatwootLatestMessage = latestIncomingMessage(messages);
+  const latestMessage = chatwootLatestMessage
+    ? prependSubjectToText(chatwootLatestMessage, body.latest_subject || '')
+    : fallbackLatestMessage;
   const conversationText = conversationToText(messages);
   const contact = body.contact || body.conversation?.meta?.sender || {};
   const contactEmail = body.contact_email || contact.email || '';
