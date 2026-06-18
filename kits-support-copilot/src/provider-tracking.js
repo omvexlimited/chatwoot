@@ -1,13 +1,19 @@
-const PROVIDER_PORTALS = {
-  1: {
+const PROVIDER_PORTALS = [
+  {
+    key: 'mign-jin',
+    providerNumber: 1,
     name: 'Mign Jin',
-    url: 'http://193.112.141.69:8082/en/trackIndex.htm'
+    url: 'http://193.112.141.69:8082/en/trackIndex.htm',
+    patterns: [/mign\s*jin/i, /^\s*1\s*-/i, /\(1\)/]
   },
-  2: {
+  {
+    key: 'xiao-ming',
+    providerNumber: 2,
     name: 'Xiao-ming',
-    url: 'http://119.91.41.88:8082/en/trackIndex.htm'
+    url: 'http://119.91.41.88:8082/en/trackIndex.htm',
+    patterns: [/xiao[\s-]*ming/i, /^\s*2\s*-/i, /\(2\)/]
   }
-};
+];
 
 export async function getProviderTrackingContext({
   provider,
@@ -17,14 +23,15 @@ export async function getProviderTrackingContext({
 }) {
   if (!order) return unavailable('no_order');
 
-  const providerId = Number(provider?.id || order?.assigned_provider?.id);
-  if (!providerId) return unavailable('no_provider');
+  const providerId = Number(provider?.id || order?.assigned_provider?.id) || null;
+  const providerLabel = getProviderLabel(provider, order);
+  if (!providerId && !providerLabel) return unavailable('no_provider');
 
-  const portal = PROVIDER_PORTALS[providerId];
+  const portal = resolveProviderPortal(provider, order);
   if (!portal) {
     return unavailable(
       'provider_not_supported',
-      `Provider tracking lookup is not configured for provider ${providerId}.`
+      `Provider tracking lookup is not configured for provider ${providerLabel || providerId}.`
     );
   }
 
@@ -49,7 +56,7 @@ export async function getProviderTrackingContext({
     if (!response?.ok) {
       return unavailable(
         'http_error',
-        `Provider tracking lookup failed for provider ${providerId}: HTTP ${response?.status || 'unknown'}.`
+        `Provider tracking lookup failed for provider ${providerLabel || providerId}: HTTP ${response?.status || 'unknown'}.`
       );
     }
 
@@ -66,6 +73,8 @@ export async function getProviderTrackingContext({
       available: true,
       source: 'provider_portal',
       provider_id: providerId,
+      provider_portal_key: portal.key,
+      provider_portal_number: portal.providerNumber,
       provider_name: portal.name,
       tracking_number: trackingNumber,
       ...parsed,
@@ -75,11 +84,38 @@ export async function getProviderTrackingContext({
     const timedOut = error?.name === 'AbortError';
     return unavailable(
       timedOut ? 'timeout' : 'lookup_failed',
-      `Provider tracking lookup failed for provider ${providerId}: ${timedOut ? 'timeout' : error.message}.`
+      `Provider tracking lookup failed for provider ${providerLabel || providerId}: ${timedOut ? 'timeout' : error.message}.`
     );
   } finally {
     clearTimeout(timer);
   }
+}
+
+function resolveProviderPortal(provider, order) {
+  const providerId = Number(provider?.id || order?.assigned_provider?.id);
+  const byConfiguredNumber = PROVIDER_PORTALS.find(portal => portal.providerNumber === providerId);
+  if (byConfiguredNumber) return byConfiguredNumber;
+
+  const label = getProviderLabel(provider, order);
+  if (!label) return null;
+
+  return PROVIDER_PORTALS.find(portal => portal.patterns.some(pattern => pattern.test(label))) || null;
+}
+
+function getProviderLabel(provider = {}, order = {}) {
+  return [
+    provider?.label,
+    provider?.name,
+    provider?.code,
+    provider?.provider,
+    order?.provider,
+    order?.assigned_provider?.label,
+    order?.assigned_provider?.name,
+    order?.assigned_provider?.code
+  ]
+    .filter(Boolean)
+    .map(value => cleanText(value))
+    .join(' ');
 }
 
 export function parseProviderTrackingHtml(html = '', { trackingNumber = '' } = {}) {
@@ -228,6 +264,8 @@ function unavailable(reason, warning = null) {
     source: null,
     reason,
     provider_id: null,
+    provider_portal_key: null,
+    provider_portal_number: null,
     provider_name: null,
     tracking_number: null,
     reference_number: null,

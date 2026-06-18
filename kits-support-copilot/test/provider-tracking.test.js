@@ -91,6 +91,49 @@ test('provider 2 uses Xiao-ming portal', async () => {
   assert.equal(String(calls[0].options.body), 'documentCode=XM123456789');
 });
 
+test('provider lookup resolves Xiao-ming by label when internal id differs', async () => {
+  const calls = [];
+  const result = await getProviderTrackingContext({
+    provider: { id: 36, label: '2 - Xiao-ming · xiao-ming' },
+    order: orderWithTracking('0082800082909724139065'),
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        text: async () => SAMPLE_HTML.replaceAll('0082800082809769818715', '0082800082909724139065')
+      };
+    }
+  });
+
+  assert.equal(calls[0].url, 'http://119.91.41.88:8082/en/trackIndex.htm');
+  assert.equal(String(calls[0].options.body), 'documentCode=0082800082909724139065');
+  assert.equal(result.available, true);
+  assert.equal(result.provider_id, 36);
+  assert.equal(result.provider_portal_number, 2);
+  assert.equal(result.provider_name, 'Xiao-ming');
+});
+
+test('provider lookup resolves Mign Jin by order assigned provider label', async () => {
+  const calls = [];
+  await getProviderTrackingContext({
+    provider: { id: 99 },
+    order: {
+      ...orderWithTracking('MJ123456789'),
+      assigned_provider: { label: '1 - Mign Jin · 194939' }
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        text: async () => SAMPLE_HTML.replaceAll('0082800082809769818715', 'MJ123456789')
+      };
+    }
+  });
+
+  assert.equal(calls[0].url, 'http://193.112.141.69:8082/en/trackIndex.htm');
+  assert.equal(String(calls[0].options.body), 'documentCode=MJ123456789');
+});
+
 test('unsupported provider returns non-blocking warning without fetching', async () => {
   let called = false;
   const result = await getProviderTrackingContext({
