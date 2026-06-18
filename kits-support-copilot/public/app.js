@@ -256,6 +256,7 @@ async function sendAgentMessage(rawMessage) {
       contact_email: result.contact_email || state.contextResult?.contact_email,
       context_summary: result.context_summary || state.contextResult?.context_summary,
       provider_context: result.provider_context || state.contextResult?.provider_context,
+      provider_tracking_context: result.provider_tracking_context || state.contextResult?.provider_tracking_context,
       delivery_estimate_context: result.delivery_estimate_context || state.contextResult?.delivery_estimate_context,
       issue_context: result.issue_context || state.contextResult?.issue_context,
       shopify_context: result.shopify_context,

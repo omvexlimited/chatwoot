@@ -88,6 +88,35 @@ test('shows carrier delivery estimate in tracking card when available', () => {
   assert.equal(view.rawPayload.delivery_estimate_context.available, true);
 });
 
+test('shows provider tracking details in tracking card when available', () => {
+  const view = buildContextView(contextResult({
+    providerTracking: {
+      available: true,
+      source: 'provider_portal',
+      provider_id: 1,
+      provider_name: 'Mign Jin',
+      tracking_number: 'KR123',
+      last_update_at: '2026-06-18 10:14:57',
+      last_record: 'Delivery Service Provider',
+      normalized_status: 'delivery_service_provider',
+      customs_status: 'customs_clearance_completed',
+      latest_events: [
+        { date: '2026-06-18 10:14:57', record: 'Delivery Service Provider' },
+        { date: '2026-06-16 12:12:49', record: 'In transit to final service provider' },
+        { date: '2026-06-14 12:11:20', record: 'Customs clearance completed' }
+      ],
+      timeline: []
+    }
+  }));
+  const tracking = view.cards.find(card => card.title === 'Tracking');
+
+  assert.equal(tracking.rows.find(row => row.label === 'Provider source').value, 'Mign Jin');
+  assert.equal(tracking.rows.find(row => row.label === 'Provider status').value, 'Delivery Service Provider');
+  assert.equal(tracking.rows.find(row => row.label === 'Customs').value, 'customs clearance completed');
+  assert.match(tracking.rows.find(row => row.label === 'Event 1').value, /Delivery Service Provider/);
+  assert.equal(view.rawPayload.provider_tracking_context.available, true);
+});
+
 test('shows actual transit time for delivered estimate without remaining days', () => {
   const view = buildContextView(contextResult({
     deliveryEstimate: {
@@ -199,6 +228,7 @@ function contextResult({
   trackingUrl = 'https://tracking.example.test',
   trackingCarrier = 'CTT Express',
   deliveryEstimate = null,
+  providerTracking = null,
   orderCandidates = [],
   issueContext = {
     available: true,
@@ -250,12 +280,14 @@ function contextResult({
       tracking_carrier: trackingCarrier,
       tracking_number: trackingNumber,
       tracking_url: trackingUrl,
+      provider_tracking_context: providerTracking,
       delivery_estimate_context: deliveryEstimate,
       issue_context: issueContext,
       shipping_country: 'Spain',
       shipping_country_code: 'ES',
       order_candidates: orderCandidates
     },
+    provider_tracking_context: providerTracking,
     issue_context: issueContext,
     shopify_context: {
       selected_order: {

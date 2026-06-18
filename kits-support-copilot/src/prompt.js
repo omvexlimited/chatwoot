@@ -36,6 +36,7 @@ export function buildPrompt({
   responseLanguage,
   supportCase,
   deliveryEstimateContext,
+  providerTrackingContext,
   issueContext
 }) {
   const responseLanguageHint = formatResponseLanguageHint(responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext }));
@@ -44,6 +45,7 @@ export function buildPrompt({
   const customsContext = buildCustomsContext({ shopifyContext, supportCase });
   const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
   const deliveryTimingGuidance = JSON.stringify(buildDeliveryTimingGuidance(deliveryEstimateContext), null, 2);
+  const providerTrackingSummary = JSON.stringify(providerTrackingContext || null, null, 2);
   const issueContextSummary = JSON.stringify(issueContext || null, null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
@@ -68,6 +70,7 @@ export function buildPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
+      providerTrackingInstruction(),
       customsPendingInstruction(),
       deliveryEstimateInstruction(),
       draftLanguageInstruction(),
@@ -102,6 +105,9 @@ export function buildPrompt({
       'Delivery timing guidance:',
       deliveryTimingGuidance,
       '',
+      'Provider tracking context:',
+      providerTrackingSummary,
+      '',
       'Open ticket context:',
       issueContextSummary,
       '',
@@ -123,6 +129,7 @@ export function buildCopilotChatPrompt({
   supportCase,
   agentConfirmedFacts = [],
   deliveryEstimateContext,
+  providerTrackingContext,
   approvedMemories = [],
   issueContext
 }) {
@@ -135,6 +142,7 @@ export function buildCopilotChatPrompt({
   const customsContext = buildCustomsContext({ shopifyContext, supportCase });
   const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
   const deliveryTimingGuidance = JSON.stringify(buildDeliveryTimingGuidance(deliveryEstimateContext), null, 2);
+  const providerTrackingSummary = JSON.stringify(providerTrackingContext || null, null, 2);
   const issueContextSummary = JSON.stringify(issueContext || null, null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
@@ -176,6 +184,7 @@ export function buildCopilotChatPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
+      providerTrackingInstruction(),
       customsPendingInstruction(),
       deliveryEstimateInstruction(),
       'assistant_message is for the support agent and can briefly explain what changed or what is missing.',
@@ -219,6 +228,9 @@ export function buildCopilotChatPrompt({
       '',
       'Delivery timing guidance:',
       deliveryTimingGuidance,
+      '',
+      'Provider tracking context:',
+      providerTrackingSummary,
       '',
       'Open ticket context:',
       issueContextSummary,
@@ -285,7 +297,24 @@ function linkInstruction() {
     'If you include a policy link, place it directly after the paragraph that mentions that policy/timeframe, not at the end by default.',
     'If you mention returns, refunds, exchanges, return shipping, or returns to China, include https://kitsrepublic.com/policies/refund-policy once.',
     'If you mention sizing advice, measurements, or the size guide, include https://kitsrepublic.com/pages/size-guide once.',
+    'If you mention legal terms, checkout terms, terms and conditions, or purchase conditions, include https://kitsrepublic.com/policies/terms-of-service once.',
+    'If you mention privacy, personal data, data protection, GDPR, or customer data rights, include https://kitsrepublic.com/policies/privacy-policy once.',
+    'If you mention FAQ, Help Center, general help documentation, or questions not covered by a specific policy link, include https://kitsrepublic.com/pages/faq-help-center once.',
     'Format links as a label line, a blank line, then the URL. Never write Label:https://...'
+  ].join(' ');
+}
+
+function providerTrackingInstruction() {
+  return [
+    'Provider tracking context rule:',
+    'Provider tracking context is internal tracking data fetched from the assigned Kits Republic provider portal.',
+    'When provider_tracking_context.available=true, use provider_tracking_context.normalized_status, customs_status, last_record, last_update_at, and latest_events as the best source for logistics status.',
+    'Provider tracking context overrides Shopify/17TRACK for customs and local handoff status, unless the agent explicitly gives a newer operational instruction.',
+    'If provider_tracking_context.customs_status is customs_clearance_completed, do not say the shipment is still in customs clearance; say customs clearance has been completed and the parcel is moving toward or with the final/local delivery provider.',
+    'If normalized_status is delivery_service_provider, in_transit_to_final_provider, or ready_for_final_service_provider, explain that the shipment is in the final handoff stage before local delivery and tracking should continue updating automatically.',
+    'If customs_status is customs_clearance_in_progress, use the normal customs explanation.',
+    'Never mention provider portal URLs, IP addresses, internal provider systems, reference numbers, raw Chinese status text, or this internal lookup source in the customer draft.',
+    'Customer tracking links must still use only the canonical Kits Republic tracking URL.'
   ].join(' ');
 }
 

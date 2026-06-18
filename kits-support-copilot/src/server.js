@@ -7,6 +7,7 @@ import { loadConfig, getConfigStatus } from './config.js';
 import { fetchConversationMessages, createPrivateNote, prepareDraftReply } from './chatwoot.js';
 import { getShopifyContext } from './shopify.js';
 import { getAssignedProviders } from './provider-lookup.js';
+import { getProviderTrackingContext } from './provider-tracking.js';
 import { getDeliveryEstimateContext } from './delivery-estimates.js';
 import { getIssueContext } from './issue-lookup.js';
 import { applyAgentDraftLanguageOverride, detectLanguageFromText, inferResponseLanguage } from './language.js';
@@ -117,6 +118,7 @@ async function handleSuggestReply(req, res) {
     responseLanguage: context.responseLanguage,
     supportCase: context.supportCase,
     deliveryEstimateContext: context.deliveryEstimateContext,
+    providerTrackingContext: context.providerTrackingContext,
     issueContext: context.issueContext
   });
 
@@ -135,6 +137,7 @@ async function handleSuggestReply(req, res) {
     reasoning_summary: result.reasoning_summary,
     shopify_context: context.shopifyContext,
     provider_context: context.providerContext,
+    provider_tracking_context: context.providerTrackingContext,
     issue_context: context.issueContext,
     context_summary: summarizeContext(context),
     contact_email: context.contactEmail,
@@ -290,6 +293,7 @@ async function handleCopilotChat(req, res) {
     supportCase: context.supportCase,
     agentConfirmedFacts,
     deliveryEstimateContext: context.deliveryEstimateContext,
+    providerTrackingContext: context.providerTrackingContext,
     approvedMemories: memoryResult.memories,
     issueContext: context.issueContext
   });
@@ -364,6 +368,7 @@ function sendCopilotChatResponse(res, {
     reasoning_summary: reasoningSummary,
     shopify_context: context.shopifyContext,
     provider_context: context.providerContext,
+    provider_tracking_context: context.providerTrackingContext,
     issue_context: context.issueContext,
     context_summary: summarizeContext(responseContext),
     contact_email: context.contactEmail,
@@ -372,7 +377,7 @@ function sendCopilotChatResponse(res, {
     agent_confirmed_facts: agentConfirmedFacts,
     approved_memories: formatPromptMemories(approvedMemories),
     confidence,
-    warnings: uniqueStrings(warnings),
+    warnings: uniqueStrings([...warnings, ...(context.warnings || [])]),
     preserve_draft: preserveDraft,
     skip_insert: skipInsert,
     pending_issue: pendingIssue
@@ -449,6 +454,18 @@ async function prepareConversationContext(body) {
     warnings: [`Delivery analytics lookup failed: ${error.message}`]
   }));
 
+  const providerTrackingContext = await getProviderTrackingContext({
+    provider: providerContext.provider,
+    order: shopifyContext.selected_order
+  }).catch(error => ({
+    available: false,
+    source: null,
+    reason: 'lookup_failed',
+    warnings: [`Provider tracking lookup failed: ${error.message}`],
+    latest_events: [],
+    timeline: []
+  }));
+
   const issueContext = await getIssueContext({
     config,
     order: shopifyContext.selected_order
@@ -466,6 +483,7 @@ async function prepareConversationContext(body) {
     ...(chatwootResult.warnings || []),
     ...(shopifyContext.warnings || []),
     ...(providerContext.warnings || []),
+    ...(providerTrackingContext?.warnings || []),
     ...(deliveryEstimateContext?.warnings || []),
     ...(issueContext?.warnings || [])
   ]);
@@ -484,6 +502,7 @@ async function prepareConversationContext(body) {
     chatwootAvailable: Boolean(chatwootResult.available),
     shopifyContext,
     providerContext,
+    providerTrackingContext,
     deliveryEstimateContext,
     issueContext,
     responseLanguage,
@@ -546,6 +565,7 @@ function contextPayload(context) {
     response_language: context.responseLanguage,
     support_case: context.supportCase,
     provider_context: context.providerContext,
+    provider_tracking_context: context.providerTrackingContext,
     delivery_estimate_context: context.deliveryEstimateContext,
     issue_context: context.issueContext,
     shopify_context: context.shopifyContext,
@@ -563,6 +583,7 @@ function summarizeContext(context) {
       status: 'No single Shopify order selected.',
       selected_order_ref: null,
       order_candidates: summarizeOrderCandidates(context.shopifyContext.orders),
+      provider_tracking_context: null,
       delivery_estimate_context: null,
       issue_context: context.issueContext,
       response_language: context.responseLanguage,
@@ -593,6 +614,7 @@ function summarizeContext(context) {
     tracking_carrier: tracking?.company || null,
     tracking_number: tracking?.number || null,
     tracking_url: buildPublicTrackingUrl(tracking?.number) || tracking?.url || null,
+    provider_tracking_context: context.providerTrackingContext,
     delivery_estimate_context: context.deliveryEstimateContext,
     issue_context: context.issueContext,
     shipping_country: order.shipping_address?.country || null,

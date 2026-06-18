@@ -253,6 +253,57 @@ test('adds refund policy link when returns or exchanges are mentioned', () => {
   assert.match(result, /https:\/\/kitsrepublic\.com\/policies\/refund-policy/);
 });
 
+test('adds terms privacy and FAQ links when those topics are mentioned', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'You can review our terms and conditions before checkout.',
+    '',
+    'Our privacy policy explains how we handle personal data.',
+    '',
+    'You can also check the FAQ Help Center for general questions.',
+    '',
+    'Best regards,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({ draft, responseLanguage: { language: 'English' } });
+
+  assert.match(result, /Terms of service:\n\nhttps:\/\/kitsrepublic\.com\/policies\/terms-of-service/);
+  assert.match(result, /Privacy policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/privacy-policy/);
+  assert.match(result, /FAQ \/ Help Center:\n\nhttps:\/\/kitsrepublic\.com\/pages\/faq-help-center/);
+});
+
+test('deduplicates manually included terms privacy and FAQ links', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'You can review our terms and conditions before checkout.',
+    '',
+    'Terms of service:https://kitsrepublic.com/policies/terms-of-service',
+    '',
+    'Our privacy policy explains how we handle personal data.',
+    '',
+    'Privacy policy:https://kitsrepublic.com/policies/privacy-policy',
+    '',
+    'Please check our FAQ Help Center too.',
+    '',
+    'FAQ / Help Center:https://kitsrepublic.com/pages/faq-help-center',
+    '',
+    'Best regards,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({ draft, responseLanguage: { language: 'English' } });
+
+  assert.equal((result.match(/terms-of-service/g) || []).length, 1);
+  assert.equal((result.match(/privacy-policy/g) || []).length, 1);
+  assert.equal((result.match(/faq-help-center/g) || []).length, 1);
+  assert.doesNotMatch(result, /service:https/);
+  assert.doesNotMatch(result, /policy:https/);
+  assert.doesNotMatch(result, /Center:https/);
+});
+
 test('replaces Shopify 17track proxy URL in customs drafts', () => {
   const draft = [
     'Hi,',
@@ -418,6 +469,41 @@ test('removes Royal Mail tracking links and redundant tracking number lines', ()
   assert.ok(result.indexOf('This means the shipping label') < result.indexOf('You can follow the shipment here:'));
   assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('Best regards,'));
   assert.match(result, /Best regards,\n\nwww\.kitsrepublic\.com$/);
+});
+
+test('removes internal provider tracking portal links from customer drafts', () => {
+  const draft = [
+    'Hi,',
+    '',
+    'Thank you for your email.',
+    '',
+    'Your shipment has cleared customs and is moving to the final delivery provider.',
+    '',
+    'You can check it here:',
+    'http://193.112.141.69:8082/en/trackIndex.htm',
+    '',
+    'Best regards,',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'English' },
+    shopifyContext: {
+      selected_order: {
+        fulfillments: [
+          {
+            tracking_numbers: ['0082800082809769818715'],
+            tracking: [{ number: '0082800082809769818715' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.doesNotMatch(result, /193\.112\.141\.69|119\.91\.41\.88/);
+  assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
+  assert.match(result, /https:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=0082800082809769818715/);
 });
 
 test('replaces carrier-only tracking links with the Kits Republic tracking link', () => {

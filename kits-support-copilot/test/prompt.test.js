@@ -17,6 +17,12 @@ test('loads base guide and Kits Republic playbook into knowledge base', async ()
   assert.match(knowledgeBase, /Pending receipt at CTT Express/);
   assert.match(knowledgeBase, /Pendiente de entrada en red/);
   assert.match(knowledgeBase, /CTT todavia no ha recibido fisicamente el paquete/);
+  assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/policies\/refund-policy/);
+  assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/policies\/terms-of-service/);
+  assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/policies\/privacy-policy/);
+  assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/pages\/size-guide/);
+  assert.match(knowledgeBase, /https:\/\/kitsrepublic\.com\/pages\/faq-help-center/);
 });
 
 test('builds iterative chat prompt with current draft and chat history', () => {
@@ -83,11 +89,17 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /Never invent completed operational actions/);
   assert.match(prompt.system, /Agent chat messages are trusted operational context/);
   assert.match(prompt.system, /Use one customer-facing link per topic and never duplicate links/);
+  assert.match(prompt.system, /Provider tracking context is internal tracking data/);
+  assert.match(prompt.system, /customs_status is customs_clearance_completed, do not say the shipment is still in customs clearance/);
+  assert.match(prompt.system, /Never mention provider portal URLs, IP addresses/);
   assert.match(prompt.system, /never use carrier tracking URLs such as Royal Mail, CTT, Colissimo, La Poste, DHL, Evri, 17track\.net, shopify\.17track\.net/);
   assert.match(prompt.system, /Do not repeat the tracking number on a separate line/);
   assert.match(prompt.system, /immediately before the sign-off/);
   assert.match(prompt.system, /Only include https:\/\/kitsrepublic\.com\/policies\/shipping-policy when you mention an official delivery\/processing timeframe/);
   assert.match(prompt.system, /returns.*https:\/\/kitsrepublic\.com\/policies\/refund-policy/i);
+  assert.match(prompt.system, /legal terms.*https:\/\/kitsrepublic\.com\/policies\/terms-of-service/i);
+  assert.match(prompt.system, /personal data.*https:\/\/kitsrepublic\.com\/policies\/privacy-policy/i);
+  assert.match(prompt.system, /FAQ.*https:\/\/kitsrepublic\.com\/pages\/faq-help-center/i);
   assert.match(prompt.user, /Current draft/);
   assert.match(prompt.user, /make it shorter/);
   assert.match(prompt.user, /No matching Shopify order was found/);
@@ -95,9 +107,62 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.user, /customs_pending/);
   assert.match(prompt.user, /Customs context/);
   assert.match(prompt.user, /Delivery estimate context/);
+  assert.match(prompt.user, /Provider tracking context/);
   assert.match(prompt.user, /kitsrepublic\.com\/apps\/17TRACK\?nums=0141605773793172/);
   assert.match(prompt.user, /Royal Mail expecting parcel/);
   assert.match(prompt.user, /Royal Mail does not recognise the tracking number yet/);
+});
+
+test('passes provider tracking context to prompt as logistics source', () => {
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Guide text',
+    conversationText: 'INCOMING Customer: The tracking has not updated.',
+    shopifyContext: {
+      selected_order: {
+        name: '#1421',
+        fulfillments: [
+          {
+            display_status: 'CONFIRMED',
+            tracking_numbers: ['0082800082809769818715'],
+            tracking: [{ company: 'CTT Express', number: '0082800082809769818715' }]
+          }
+        ]
+      },
+      selection_reason: 'Matched explicit order #1421.',
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'The tracking has not updated.',
+    agentEmail: 'agent@example.com',
+    supportCase: {
+      type: 'customs_pending',
+      confidence: 'high',
+      reasons: ['tracking_present', 'local_handoff_carrier:CTT Express']
+    },
+    providerTrackingContext: {
+      available: true,
+      source: 'provider_portal',
+      provider_id: 1,
+      provider_name: 'Mign Jin',
+      tracking_number: '0082800082809769818715',
+      last_update_at: '2026-06-18 10:14:57',
+      last_record: 'Delivery Service Provider',
+      normalized_status: 'delivery_service_provider',
+      customs_status: 'customs_clearance_completed',
+      latest_events: [
+        { date: '2026-06-18 10:14:57', record: 'Delivery Service Provider', normalized_status: 'delivery_service_provider' },
+        { date: '2026-06-14 12:11:20', record: 'Customs clearance completed', normalized_status: 'customs_clearance_completed' }
+      ],
+      timeline: []
+    },
+    chatMessages: [{ role: 'user', content: 'Generate a reply.' }]
+  });
+
+  assert.match(prompt.user, /Provider tracking context/);
+  assert.match(prompt.user, /customs_clearance_completed/);
+  assert.match(prompt.user, /Delivery Service Provider/);
+  assert.match(prompt.system, /Provider tracking context overrides Shopify\/17TRACK/);
+  assert.match(prompt.system, /do not say the shipment is still in customs clearance/);
 });
 
 test('passes carrier delivery estimates to prompt with non-promissory rules', () => {

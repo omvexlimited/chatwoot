@@ -16,6 +16,7 @@ export function buildContextView(result = {}) {
   const trackingNumber = summary.tracking_number || orderTracking(order)?.number || null;
   const trackingCarrier = summary.tracking_carrier || orderTracking(order)?.company || null;
   const deliveryEstimate = result.delivery_estimate_context || summary.delivery_estimate_context || null;
+  const providerTracking = result.provider_tracking_context || summary.provider_tracking_context || null;
   const issueContext = result.issue_context || summary.issue_context || null;
   const orderCandidates = normalizeOrderCandidates(summary.order_candidates);
   const lineItems = normalizeLineItems(summary.line_items || order?.line_items);
@@ -34,13 +35,14 @@ export function buildContextView(result = {}) {
       ticketsCard(issueContext),
       itemsCard(lineItems),
       ordersCard(orderCandidates),
-      trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate }),
+      trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate, providerTracking }),
       caseCard(supportCase),
       warningsCard(warnings)
     ].filter(Boolean),
     rawPayload: {
       context_summary: summary,
       support_case: supportCase,
+      provider_tracking_context: providerTracking,
       delivery_estimate_context: deliveryEstimate,
       issue_context: issueContext,
       warnings,
@@ -83,6 +85,26 @@ export function formatContextDate(value) {
   }).format(date);
 }
 
+function formatContextDateTime(value) {
+  if (!value) return '';
+  const text = String(value);
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  const date = match
+    ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5])))
+    : new Date(text);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC'
+  }).format(date);
+}
+
 function customerCard({ result, summary, responseLanguage }) {
   return {
     title: 'Customer',
@@ -113,9 +135,10 @@ function orderCard({ orderName, orderDate, adminOrderUrl, shopifyAdminUrl, provi
   };
 }
 
-function trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate }) {
+function trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate, providerTracking }) {
   const hasTracking = Boolean(trackingNumber || trackingUrl);
   const estimateRows = trackingEstimateRows(deliveryEstimate);
+  const providerRows = providerTrackingRows(providerTracking);
   return {
     title: 'Tracking',
     rows: [
@@ -126,9 +149,31 @@ function trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, d
         url: trackingNumber && trackingUrl ? trackingUrl : null
       },
       { label: 'Status', value: summary.shipment_status || '-' },
-      ...estimateRows
+      ...estimateRows,
+      ...providerRows
     ]
   };
+}
+
+function providerTrackingRows(providerTracking) {
+  if (!providerTracking?.available) return [];
+
+  const rows = [
+    { label: 'Provider source', value: providerTracking.provider_name || `Provider ${providerTracking.provider_id || ''}`.trim() || '-' },
+    { label: 'Provider update', value: formatContextDateTime(providerTracking.last_update_at) || '-' },
+    { label: 'Provider status', value: providerTracking.last_record || providerTracking.normalized_status || '-' },
+    { label: 'Customs', value: formatMachineStatus(providerTracking.customs_status) }
+  ];
+
+  const events = Array.isArray(providerTracking.latest_events) ? providerTracking.latest_events.slice(0, 3) : [];
+  events.forEach((event, index) => {
+    rows.push({
+      label: `Event ${index + 1}`,
+      value: [formatContextDateTime(event.date), event.record].filter(Boolean).join(' - ') || '-'
+    });
+  });
+
+  return rows;
 }
 
 function trackingEstimateRows(estimate) {
@@ -274,6 +319,10 @@ function formatLanguage(responseLanguage) {
 function formatReasons(reasons) {
   if (!Array.isArray(reasons) || !reasons.length) return '-';
   return reasons.slice(0, 4).join(', ');
+}
+
+function formatMachineStatus(value) {
+  return String(value || '-').replace(/_/g, ' ');
 }
 
 function formatDays(value) {

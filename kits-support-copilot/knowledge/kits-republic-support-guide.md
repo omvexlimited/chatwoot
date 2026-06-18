@@ -8,6 +8,17 @@
 - Do not promise refunds, replacements, delivery dates, or compensation unless the policy and data clearly support it.
 - If data is missing, ask for exactly the missing detail.
 
+## Official Kits Republic Links
+
+- Shipping policy: https://kitsrepublic.com/policies/shipping-policy
+- Refund policy: https://kitsrepublic.com/policies/refund-policy
+- Terms of service: https://kitsrepublic.com/policies/terms-of-service
+- Privacy policy: https://kitsrepublic.com/policies/privacy-policy
+- Size guide: https://kitsrepublic.com/pages/size-guide
+- FAQ / Help Center: https://kitsrepublic.com/pages/faq-help-center
+
+Use these as the canonical public links in customer replies. Do not fetch live policy content at reply time; update this knowledge manually when a public page changes.
+
 ## Shipping And Tracking
 
 - Use the Shopify order and fulfillment data as the source of truth.

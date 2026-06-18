@@ -4,7 +4,10 @@ import { buildDeliveryTimingGuidance } from './delivery-guidance.js';
 const POLICY_LINKS = {
   shipping: 'https://kitsrepublic.com/policies/shipping-policy',
   refund: 'https://kitsrepublic.com/policies/refund-policy',
-  sizeGuide: 'https://kitsrepublic.com/pages/size-guide'
+  sizeGuide: 'https://kitsrepublic.com/pages/size-guide',
+  terms: 'https://kitsrepublic.com/policies/terms-of-service',
+  privacy: 'https://kitsrepublic.com/policies/privacy-policy',
+  faqHelp: 'https://kitsrepublic.com/pages/faq-help-center'
 };
 
 export function enforceDraftRequirements({
@@ -56,7 +59,7 @@ export function enforceDraftRequirements({
 
 function canonicalizeTrackingLinks(text, trackingUrl) {
   return text.replace(
-    /https?:\/\/(?:www\.)?(?:17track\.net|shopify\.17track\.net|royalmail\.com|ctt\.pt|cttexpress\.com|ctt\.es|colissimo\.fr|laposte\.fr|evri\.com|hermesworld\.com|parcelsapp\.com|aftership\.com|dhl\.[a-z.]+)\/\S+|https?:\/\/(?:www\.)?kitsrepublic\.com\/(?:apps\/17TRACK\?nums=|tracking\/)\S+/gi,
+    /https?:\/\/(?:(?:193\.112\.141\.69|119\.91\.41\.88):8082|(?:www\.)?(?:17track\.net|shopify\.17track\.net|royalmail\.com|ctt\.pt|cttexpress\.com|ctt\.es|colissimo\.fr|laposte\.fr|evri\.com|hermesworld\.com|parcelsapp\.com|aftership\.com|dhl\.[a-z.]+))\/\S+|https?:\/\/(?:www\.)?kitsrepublic\.com\/(?:apps\/17TRACK\?nums=|tracking\/)\S+/gi,
     trackingUrl
   );
 }
@@ -495,7 +498,10 @@ function applyRequiredPolicyLinks(text, language) {
   return [
     ['shipping', needsShippingPolicy],
     ['refund', needsRefundPolicy],
-    ['sizeGuide', needsSizeGuide]
+    ['sizeGuide', needsSizeGuide],
+    ['terms', needsTermsPolicy],
+    ['privacy', needsPrivacyPolicy],
+    ['faqHelp', needsFaqHelpCenter]
   ].reduce((value, [type, predicate]) => {
     const withoutDuplicates = removePolicyLinkBlocks(value, POLICY_LINKS[type]);
     if (!predicate(withoutDuplicates)) return withoutDuplicates;
@@ -515,6 +521,18 @@ function needsSizeGuide(text) {
   return /\b(size guide|sizing|measurements|what size|which size|gu[ií]a de tallas|tabla de tallas|medidas|qu[eé] talla|taille|guide des tailles|gr[oö][sß]entabelle|guida alle taglie)\b/i.test(text);
 }
 
+function needsTermsPolicy(text) {
+  return /\b(terms of service|terms and conditions|checkout terms|purchase conditions|conditions of purchase|t[eé]rminos (?:del servicio|y condiciones)|condiciones de compra|conditions g[eé]n[eé]rales|conditions d'achat|agb|allgemeine gesch[aä]ftsbedingungen|termini e condizioni|termos e condi[cç][oõ]es)\b/i.test(text);
+}
+
+function needsPrivacyPolicy(text) {
+  return /\b(privacy policy|privacy|personal data|data protection|gdpr|privacidad|datos personales|protecci[oó]n de datos|politique de confidentialit[eé]|donn[eé]es personnelles|datenschutz|personenbezogene daten|privacybeleid|gegevensbescherming|informativa privacy|politica de privacidade)\b/i.test(text);
+}
+
+function needsFaqHelpCenter(text) {
+  return /\b(faq|help center|help centre|faq help center|help documentation|preguntas frecuentes|centro de ayuda|centre d'aide|foire aux questions|hilfezentrum|centro assistenza|centro de ajuda|veelgestelde vragen)\b/i.test(text);
+}
+
 function removePolicyLinkBlocks(text, url) {
   const lines = text.split('\n');
   const remove = new Set();
@@ -526,7 +544,7 @@ function removePolicyLinkBlocks(text, url) {
 }
 
 function isPolicyLabelLine(line = '') {
-  return /\b(policy|pol[ií]tica|politique|richtlinie|beleid|gu[ií]a|guide|maattabel|tabella)\b/i.test(line);
+  return /\b(policy|pol[ií]tica|politique|richtlinie|beleid|gu[ií]a|guide|maattabel|tabella|terms|t[eé]rminos|privacy|privacidad|faq|help center|centro de ayuda)\b/i.test(line);
 }
 
 function insertPolicyAfterMatchingParagraph(text, language, type, predicate) {
@@ -575,6 +593,36 @@ function policyLinkBlock(language, type) {
       Italian: 'Guida alle taglie:',
       Portuguese: 'Guia de tamanhos:',
       Dutch: 'Maattabel:'
+    },
+    terms: {
+      English: 'Terms of service:',
+      Spanish: 'Términos del servicio:',
+      Catalan: 'Termes del servei:',
+      French: 'Conditions de service:',
+      German: 'Nutzungsbedingungen:',
+      Italian: 'Termini di servizio:',
+      Portuguese: 'Termos de serviço:',
+      Dutch: 'Servicevoorwaarden:'
+    },
+    privacy: {
+      English: 'Privacy policy:',
+      Spanish: 'Política de privacidad:',
+      Catalan: 'Política de privacitat:',
+      French: 'Politique de confidentialité:',
+      German: 'Datenschutzrichtlinie:',
+      Italian: 'Informativa sulla privacy:',
+      Portuguese: 'Política de privacidade:',
+      Dutch: 'Privacybeleid:'
+    },
+    faqHelp: {
+      English: 'FAQ / Help Center:',
+      Spanish: 'FAQ / Centro de ayuda:',
+      Catalan: 'FAQ / Centre d ajuda:',
+      French: 'FAQ / Centre d aide:',
+      German: 'FAQ / Hilfezentrum:',
+      Italian: 'FAQ / Centro assistenza:',
+      Portuguese: 'FAQ / Centro de ajuda:',
+      Dutch: 'FAQ / Helpcentrum:'
     }
   };
 
