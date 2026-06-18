@@ -6,13 +6,15 @@ const WEBHOOK_MAX_AGE_SECONDS = 10 * 60;
 let ensured = false;
 let workerRunning = false;
 let workerTimer = null;
+let memoryNextId = 1;
+const memoryRows = new Map();
 
 export function preparedDraftsConfigured(config = {}) {
-  return Boolean(config.copilotDatabaseUrl);
+  return Boolean(config);
 }
 
 export async function ensurePreparedDraftsTable({ config }) {
-  if (!preparedDraftsConfigured(config)) return false;
+  if (!usesDatabase(config)) return false;
   if (ensured) return true;
 
   await withPreparedDraftClient(config, async client => {
@@ -92,12 +94,9 @@ export function parsePreparedDraftWebhook(payload = {}) {
 }
 
 export async function enqueuePreparedDraftFromWebhook({ config, payload }) {
-  if (!preparedDraftsConfigured(config)) {
-    return { enqueued: false, ignored: true, reason: 'database_not_configured' };
-  }
-
   const parsed = parsePreparedDraftWebhook(payload);
   if (parsed.ignored) return { enqueued: false, ignored: true, reason: parsed.reason };
+  if (!usesDatabase(config)) return enqueueMemoryPreparedDraft(parsed.job);
 
   await ensurePreparedDraftsTable({ config });
   return withPreparedDraftClient(config, async client => {
@@ -181,6 +180,14 @@ export async function processPendingPreparedDrafts({ config, generate, limit = 2
   workerRunning = true;
 
   try {
+    if (!usesDatabase(config)) {
+      const rows = claimMemoryPendingPreparedDrafts(limit);
+      for (const row of rows) {
+        await processPreparedDraftRow({ config, generate, row });
+      }
+      return { processed: rows.length };
+    }
+
     await ensurePreparedDraftsTable({ config });
     const rows = await claimPendingPreparedDrafts({ config, limit });
     for (const row of rows) {
@@ -193,12 +200,10 @@ export async function processPendingPreparedDrafts({ config, generate, limit = 2
 }
 
 export async function getPreparedDraft({ config, accountId, conversationId, latestMessageId = '' }) {
-  if (!preparedDraftsConfigured(config)) {
-    return { status: 'unavailable', reason: 'database_not_configured' };
-  }
   if (!accountId || !conversationId) {
     return { status: 'not_found', reason: 'missing_conversation' };
   }
+  if (!usesDatabase(config)) return getMemoryPreparedDraft({ accountId, conversationId, latestMessageId });
 
   await ensurePreparedDraftsTable({ config });
   return withPreparedDraftClient(config, async client => {
@@ -337,6 +342,20 @@ async function claimPendingPreparedDrafts({ config, limit }) {
 async function processPreparedDraftRow({ config, generate, row }) {
   try {
     const result = await generate(row);
+    if (!usesDatabase(config)) {
+      updateMemoryPreparedDraft(row.id, {
+        status: 'generated',
+        draft: result.draft || '',
+        assistant_message: result.assistant_message || '',
+        agent_briefing: result.agent_briefing || null,
+        context_summary: result.context_summary || null,
+        warnings: normalizeArray(result.warnings),
+        confidence: result.confidence || 'low',
+        failure_reason: null
+      });
+      return;
+    }
+
     await withPreparedDraftClient(config, async client => {
       await client.query(
         `
@@ -364,6 +383,15 @@ async function processPreparedDraftRow({ config, generate, row }) {
       );
     });
   } catch (error) {
+    if (!usesDatabase(config)) {
+      updateMemoryPreparedDraft(row.id, {
+        status: 'failed',
+        failure_reason: error.message,
+        warnings: [error.message]
+      });
+      return;
+    }
+
     await withPreparedDraftClient(config, async client => {
       await client.query(
         `
@@ -386,6 +414,93 @@ function isIncomingMessage(value) {
 
 function ignored(reason) {
   return { ignored: true, reason };
+}
+
+function enqueueMemoryPreparedDraft(job) {
+  const existing = [...memoryRows.values()].find(row => row.chatwoot_message_id === job.chatwoot_message_id);
+  if (existing) {
+    return {
+      enqueued: false,
+      ignored: true,
+      reason: 'duplicate_message',
+      draft_id: existing.id,
+      status: existing.status
+    };
+  }
+
+  for (const row of memoryRows.values()) {
+    if (
+      row.account_id === job.account_id &&
+      row.conversation_id === job.conversation_id &&
+      ACTIVE_STATUSES.includes(row.status)
+    ) {
+      row.status = 'stale';
+      row.updated_at = new Date().toISOString();
+    }
+  }
+
+  const now = new Date().toISOString();
+  const row = {
+    id: memoryNextId,
+    account_id: job.account_id,
+    conversation_id: job.conversation_id,
+    chatwoot_message_id: job.chatwoot_message_id,
+    contact_email: job.contact_email,
+    status: 'pending',
+    draft: '',
+    assistant_message: '',
+    agent_briefing: null,
+    context_summary: null,
+    warnings: [],
+    confidence: null,
+    failure_reason: null,
+    webhook_payload: job.webhook_payload,
+    created_at: now,
+    updated_at: now,
+    inserted_at: null
+  };
+  memoryNextId += 1;
+  memoryRows.set(row.id, row);
+  pruneMemoryRows();
+  return { enqueued: true, ignored: false, draft: formatPreparedDraftRow(row) };
+}
+
+function claimMemoryPendingPreparedDrafts(limit) {
+  const rows = [...memoryRows.values()]
+    .filter(row => row.status === 'pending')
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+    .slice(0, limit);
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    row.status = 'processing';
+    row.updated_at = now;
+  }
+  return rows.map(formatPreparedDraftRow);
+}
+
+function updateMemoryPreparedDraft(id, updates) {
+  const row = memoryRows.get(Number(id));
+  if (!row) return;
+  Object.assign(row, updates, { updated_at: new Date().toISOString() });
+}
+
+function getMemoryPreparedDraft({ accountId, conversationId, latestMessageId = '' }) {
+  const rows = [...memoryRows.values()]
+    .filter(row => row.account_id === String(accountId) && row.conversation_id === String(conversationId))
+    .filter(row => !latestMessageId || row.chatwoot_message_id === String(latestMessageId))
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+
+  const row = rows[0];
+  if (!row) return { status: 'not_found' };
+  return formatPreparedDraftRow(row);
+}
+
+function pruneMemoryRows(maxRows = 250) {
+  if (memoryRows.size <= maxRows) return;
+  const rows = [...memoryRows.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  for (const row of rows.slice(0, Math.max(0, memoryRows.size - maxRows))) {
+    memoryRows.delete(row.id);
+  }
 }
 
 function inferDetectedCase(context = {}) {
@@ -561,4 +676,8 @@ async function withPreparedDraftClient(config, callback) {
   } finally {
     await client.end().catch(() => {});
   }
+}
+
+function usesDatabase(config = {}) {
+  return Boolean(config.copilotDatabaseUrl);
 }

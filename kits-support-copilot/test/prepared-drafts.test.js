@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import {
   buildAgentBriefing,
   buildPreparedDraftPayload,
+  enqueuePreparedDraftFromWebhook,
   formatAgentBriefingForChat,
+  getPreparedDraft,
   parsePreparedDraftWebhook,
   verifyChatwootWebhookSignature
 } from '../src/prepared-drafts.js';
@@ -91,6 +93,31 @@ test('builds the context payload from a prepared draft row', () => {
   assert.equal(payload.contact_email, 'customer@example.com');
   assert.equal(payload.contact_phone, '07950527911');
   assert.equal(payload.latest_message, 'Order number 2280 has it been dispatched');
+});
+
+test('stores prepared draft jobs in memory when database is not configured', async () => {
+  const payload = {
+    event: 'message_created',
+    id: 'memory-message-1',
+    message_type: 'incoming',
+    private: false,
+    content: 'Where is my order?',
+    account: { id: 'memory-account' },
+    conversation: { id: 'memory-conversation' },
+    sender: { email: 'customer@example.com' }
+  };
+
+  const result = await enqueuePreparedDraftFromWebhook({ config: {}, payload });
+  assert.equal(result.enqueued, true);
+
+  const stored = await getPreparedDraft({
+    config: {},
+    accountId: 'memory-account',
+    conversationId: 'memory-conversation',
+    latestMessageId: 'memory-message-1'
+  });
+  assert.equal(stored.status, 'pending');
+  assert.equal(stored.chatwoot_message_id, 'memory-message-1');
 });
 
 test('builds actionable agent briefing for size change requests', () => {
