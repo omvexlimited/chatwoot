@@ -81,6 +81,7 @@ export async function generateChatWithOpenAI({ config, prompt, fallback }) {
   return {
     assistant_message: String(parsed.assistant_message || fallback.assistant_message || ''),
     draft: String(parsed.draft || fallback.draft || ''),
+    agent_briefing: parsed.agent_briefing || fallback.agent_briefing || null,
     reasoning_summary: String(parsed.reasoning_summary || fallback.reasoning_summary || ''),
     confidence: normalizeConfidence(parsed.confidence || fallback.confidence),
     warnings: [...fallback.warnings, ...(Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : [])]

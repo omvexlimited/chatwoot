@@ -29,6 +29,18 @@ import {
 } from './new-ticket.js';
 import { runGrammarCommand } from './grammar.js';
 import {
+  buildAgentBriefing,
+  buildPreparedDraftPayload,
+  enqueuePreparedDraftFromWebhook,
+  ensurePreparedDraftsTable,
+  formatAgentBriefingForChat,
+  getPreparedDraft,
+  normalizeAgentBriefing,
+  processPendingPreparedDrafts,
+  startPreparedDraftWorker,
+  verifyChatwootWebhookSignature
+} from './prepared-drafts.js';
+import {
   buildCopilotChatPrompt,
   buildFallbackDraft,
   buildPrompt,
@@ -45,6 +57,10 @@ const knowledgeBase = await loadKnowledgeBase();
 await ensureMemoryTable({ config }).catch(error => {
   console.warn(`KR Copilot memory disabled: ${error.message}`);
 });
+await ensurePreparedDraftsTable({ config }).catch(error => {
+  console.warn(`KR Copilot prepared drafts disabled: ${error.message}`);
+});
+startPreparedDraftWorker({ config, generate: generatePreparedDraftForJob });
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -60,6 +76,10 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/chatwoot-webhook') {
+      return handleChatwootWebhook(req, res);
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/suggest-reply') {
       if (!authorizeApiRequest(req, url, res)) return;
       return handleSuggestReply(req, res);
@@ -73,6 +93,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/copilot-chat') {
       if (!authorizeApiRequest(req, url, res)) return;
       return handleCopilotChat(req, res);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/prepared-draft') {
+      if (!authorizeApiRequest(req, url, res)) return;
+      return handlePreparedDraft(req, res);
     }
 
     if (req.method === 'POST' && url.pathname === '/api/private-note') {
@@ -98,6 +123,33 @@ const server = http.createServer(async (req, res) => {
 server.listen(config.port, () => {
   console.log(`KR Copilot listening on ${config.port}`);
 });
+
+async function handleChatwootWebhook(req, res) {
+  const rawBody = await readRawBody(req);
+  const validSignature = verifyChatwootWebhookSignature({
+    secret: config.chatwootWebhookSecret,
+    rawBody,
+    signature: req.headers['x-chatwoot-signature'],
+    timestamp: req.headers['x-chatwoot-timestamp']
+  });
+
+  if (!validSignature) {
+    return sendJson(res, 401, { error: 'Invalid webhook signature' });
+  }
+
+  const payload = rawBody ? JSON.parse(rawBody) : {};
+  const result = await enqueuePreparedDraftFromWebhook({ config, payload });
+
+  if (result.enqueued) {
+    setTimeout(() => {
+      processPendingPreparedDrafts({ config, generate: generatePreparedDraftForJob, limit: 1 }).catch(error => {
+        console.warn(`Prepared draft immediate worker failed: ${error.message}`);
+      });
+    }, 0).unref?.();
+  }
+
+  return sendJson(res, result.reason === 'database_not_configured' ? 503 : 202, result);
+}
 
 async function handleSuggestReply(req, res) {
   const body = await readJsonBody(req);
@@ -326,6 +378,20 @@ async function handleCopilotChat(req, res) {
   });
 }
 
+async function handlePreparedDraft(req, res) {
+  const body = await readJsonBody(req);
+  const accountId = body.account_id || body.conversation?.account_id || config.chatwootAccountId;
+  const conversationId = body.conversation_display_id || body.conversation?.display_id || body.conversation_id || body.conversation?.id;
+  const latestMessageId = body.latest_message_id || body.message_id || '';
+  const result = await getPreparedDraft({
+    config,
+    accountId,
+    conversationId,
+    latestMessageId
+  });
+  return sendJson(res, 200, result);
+}
+
 async function handlePrivateNote(req, res) {
   const body = await readJsonBody(req);
   const accountId = body.account_id || body.conversation?.account_id || config.chatwootAccountId;
@@ -508,6 +574,106 @@ async function prepareConversationContext(body) {
     responseLanguage,
     supportCase,
     warnings
+  };
+}
+
+async function generatePreparedDraftForJob(row) {
+  const context = await prepareConversationContext(buildPreparedDraftPayload(row));
+  const memoryResult = await getRelevantMemories({
+    config,
+    context,
+    chatMessages: [{ role: 'user', content: 'Generate a reply for this customer.' }]
+  });
+  const fallbackDraft = buildFallbackDraft({
+    shopifyContext: context.shopifyContext,
+    latestMessage: context.latestMessage
+  });
+  fallbackDraft.warnings.push(...context.warnings, ...memoryResult.warnings);
+
+  const fallbackBriefing = buildAgentBriefing({
+    context,
+    result: {
+      reasoning_summary: fallbackDraft.reasoning_summary,
+      warnings: fallbackDraft.warnings
+    }
+  });
+  const fallback = {
+    assistant_message: formatAgentBriefingForChat(fallbackBriefing),
+    draft: fallbackDraft.draft,
+    agent_briefing: fallbackBriefing,
+    reasoning_summary: fallbackDraft.reasoning_summary,
+    confidence: fallbackDraft.confidence,
+    warnings: fallbackDraft.warnings
+  };
+  const prompt = buildPreparedDraftPrompt({
+    context,
+    approvedMemories: memoryResult.memories
+  });
+  const result = await generateChatWithOpenAI({ config, prompt, fallback });
+  const draft = enforceDraftRequirements({
+    draft: result.draft,
+    supportCase: context.supportCase,
+    shopifyContext: context.shopifyContext,
+    responseLanguage: context.responseLanguage,
+    deliveryEstimateContext: context.deliveryEstimateContext,
+    latestMessage: context.latestMessage
+  });
+  const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...context.warnings]);
+  const agentBriefing = normalizeAgentBriefing(result.agent_briefing, {
+    context,
+    result: {
+      ...result,
+      draft,
+      warnings
+    }
+  });
+
+  return {
+    draft,
+    assistant_message: formatAgentBriefingForChat(agentBriefing),
+    agent_briefing: agentBriefing,
+    reasoning_summary: result.reasoning_summary,
+    context_summary: summarizeContext(context),
+    confidence: result.confidence,
+    warnings
+  };
+}
+
+function buildPreparedDraftPrompt({ context, approvedMemories = [] }) {
+  const prompt = buildPrompt({
+    knowledgeBase,
+    conversationText: context.conversationText,
+    shopifyContext: context.shopifyContext,
+    latestMessage: context.latestMessage,
+    agentEmail: 'background@kitsrepublic.com',
+    responseLanguage: context.responseLanguage,
+    supportCase: context.supportCase,
+    deliveryEstimateContext: context.deliveryEstimateContext,
+    providerTrackingContext: context.providerTrackingContext,
+    issueContext: context.issueContext
+  });
+
+  return {
+    system: prompt.system.replace(
+      'Return strict JSON only with keys: draft, reasoning_summary, confidence, warnings.',
+      [
+        'Return strict JSON only with keys: assistant_message, draft, agent_briefing, reasoning_summary, confidence, warnings.',
+        'assistant_message is internal and must be written in Spanish for the support agent.',
+        'agent_briefing is internal and must be a JSON object in Spanish with keys: summary, detected_case, action_required, before_sending_checklist, customer_reply_summary, risks_or_warnings.',
+        'before_sending_checklist must explicitly list any manual Shopify/admin/supplier action needed before sending the customer reply.',
+        'If no manual action is needed, before_sending_checklist must include exactly: "No hace falta acción manual. Revisa el borrador y envíalo si está correcto."',
+        'Never put agent_briefing content inside the customer draft.'
+      ].join('\n')
+    ),
+    user: [
+      prompt.user,
+      '',
+      'Background pre-draft task:',
+      'Generate the customer draft now. Also generate an internal Spanish agent_briefing that summarizes what the agent must do before sending.',
+      '',
+      'Approved support memories:',
+      JSON.stringify(formatPromptMemories(approvedMemories), null, 2)
+    ].join('\n')
   };
 }
 
@@ -742,6 +908,11 @@ function authorizeApiRequest(req, url, res) {
 }
 
 async function readJsonBody(req) {
+  const raw = await readRawBody(req);
+  return raw ? JSON.parse(raw) : {};
+}
+
+async function readRawBody(req) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
@@ -749,8 +920,7 @@ async function readJsonBody(req) {
     if (size > 1_000_000) throw new Error('Request body too large');
     chunks.push(chunk);
   }
-  const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 async function serveStatic(pathname, res) {

@@ -35,7 +35,8 @@ export function loadConfig(env = process.env) {
     kitsInternalApiToken: envValue(env, ['KITS_INTERNAL_API_TOKEN']),
     chatwootBaseUrl,
     chatwootAccountId: envValue(env, ['CHATWOOT_ACCOUNT_ID']),
-    chatwootApiToken: envValue(env, ['CHATWOOT_API_TOKEN'])
+    chatwootApiToken: envValue(env, ['CHATWOOT_API_TOKEN']),
+    chatwootWebhookSecret: envValue(env, ['CHATWOOT_WEBHOOK_SECRET'])
   };
 }
 
@@ -49,6 +50,7 @@ export function getConfigStatus(config) {
     kits_internal_api: Boolean(config.kitsAdminBaseUrl && config.kitsInternalApiToken),
     memory: Boolean(config.copilotDatabaseUrl),
     chatwoot: Boolean(config.chatwootBaseUrl && config.chatwootApiToken),
+    chatwoot_webhook: Boolean(config.chatwootWebhookSecret),
     api_token_required: Boolean(config.copilotApiToken)
   };
 }

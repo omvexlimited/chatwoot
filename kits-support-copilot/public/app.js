@@ -36,7 +36,10 @@ const state = {
   storageKey: '',
   contextKey: '',
   contextRequestId: 0,
-  chatRequestId: 0
+  chatRequestId: 0,
+  preparedDraftRequestId: 0,
+  appliedPreparedDraftKey: '',
+  lazyDraftStartedFor: ''
 };
 
 const layout = new URLSearchParams(window.location.search).get('layout') || 'default';
@@ -146,7 +149,10 @@ function hydrateFromContext() {
   if (isNewContext) {
     state.contextRequestId += 1;
     state.chatRequestId += 1;
+    state.preparedDraftRequestId += 1;
     state.contextResult = null;
+    state.appliedPreparedDraftKey = '';
+    state.lazyDraftStartedFor = '';
     let session = loadSession(window.localStorage, state.storageKey);
     session = sessionBelongsToContact(session, contact) ? session : clearStoredSession();
     state.chatMessages = session.chatMessages;
@@ -215,12 +221,154 @@ async function loadContext() {
     state.contextResult = result;
     renderContext(result);
     setStatus('Context ready');
+    loadPreparedDraft();
   } catch (error) {
     if (!isCurrentContext({ contextKey, requestId, type: 'context' })) return;
     setStatus('Context error');
     els.contextSummary.textContent = error.message;
     els.contextBox.textContent = error.message;
   }
+}
+
+async function loadPreparedDraft({ pollAttempt = 0 } = {}) {
+  if (!isSidebarLayout) return;
+
+  const payload = buildBasePayload();
+  if (!payload.conversation_id) return;
+
+  const contextKey = state.contextKey;
+  const requestId = state.preparedDraftRequestId + 1;
+  state.preparedDraftRequestId = requestId;
+
+  try {
+    const result = await api('/api/prepared-draft', payload);
+    if (!isCurrentContext({ contextKey, requestId, type: 'preparedDraft' })) return;
+
+    if (result.status === 'generated' && result.draft) {
+      await applyPreparedDraft(result);
+      return;
+    }
+
+    if (['pending', 'processing'].includes(result.status) && pollAttempt < 12) {
+      setStatus('Preparing draft...');
+      window.setTimeout(() => {
+        if (contextKey === state.contextKey) loadPreparedDraft({ pollAttempt: pollAttempt + 1 });
+      }, 2500);
+      return;
+    }
+
+    maybeGenerateLazyDraft();
+  } catch {
+    if (!isCurrentContext({ contextKey, requestId, type: 'preparedDraft' })) return;
+    maybeGenerateLazyDraft();
+  }
+}
+
+async function applyPreparedDraft(result = {}) {
+  const key = preparedDraftKey(result);
+  if (!key || state.appliedPreparedDraftKey === key) return;
+
+  state.appliedPreparedDraftKey = key;
+  state.lastResult = {
+    ...(state.lastResult || {}),
+    ...result,
+    prepared_draft_id: result.id,
+    contact_email: result.contact_email || state.lastResult?.contact_email,
+    confidence: result.confidence || state.lastResult?.confidence,
+    warnings: result.warnings || state.lastResult?.warnings || []
+  };
+
+  if (result.context_summary && state.contextResult) {
+    state.contextResult = {
+      ...state.contextResult,
+      context_summary: result.context_summary,
+      warnings: result.warnings || state.contextResult.warnings
+    };
+    renderContext(state.contextResult);
+  }
+
+  const message = result.assistant_message || 'Draft prepared.';
+  if (!state.chatMessages.some(item => item.role === 'assistant' && item.content === message)) {
+    state.chatMessages.push({ role: 'assistant', content: message });
+  }
+
+  els.draft.value = result.draft || '';
+  els.confidence.textContent = `confidence: ${result.confidence || 'n/a'}`;
+  renderChat();
+  persistSession();
+  updateButtons();
+  await autoInsertReply(result.draft, { policy: 'auto' });
+}
+
+function maybeGenerateLazyDraft() {
+  if (!isSidebarLayout) return;
+  if (!state.contextResult) return;
+  if (state.lazyDraftStartedFor === state.contextKey) return;
+  if (els.draft.value.trim() || state.chatMessages.length) return;
+
+  state.lazyDraftStartedFor = state.contextKey;
+  generateLazyDraftFromContext();
+}
+
+async function generateLazyDraftFromContext() {
+  const contextKey = state.contextKey;
+  const requestId = state.chatRequestId + 1;
+  state.chatRequestId = requestId;
+  setStatus('Preparing draft...');
+  setBusy(true);
+
+  try {
+    const result = await api('/api/copilot-chat', {
+      ...buildBasePayload(),
+      chat_messages: [{ role: 'user', content: 'Generate a reply for this customer.' }],
+      current_draft: '',
+      pending_issue: state.pendingIssue
+    });
+    if (!isCurrentContext({ contextKey, requestId, type: 'chat' })) return;
+
+    state.lastResult = result;
+    state.pendingIssue = result.pending_issue || null;
+    state.contextResult = {
+      ...(state.contextResult || {}),
+      contact_email: result.contact_email || state.contextResult?.contact_email,
+      context_summary: result.context_summary || state.contextResult?.context_summary,
+      provider_context: result.provider_context || state.contextResult?.provider_context,
+      provider_tracking_context: result.provider_tracking_context || state.contextResult?.provider_tracking_context,
+      delivery_estimate_context: result.delivery_estimate_context || state.contextResult?.delivery_estimate_context,
+      issue_context: result.issue_context || state.contextResult?.issue_context,
+      shopify_context: result.shopify_context,
+      response_language: result.response_language,
+      support_case: result.support_case,
+      warnings: result.warnings
+    };
+    state.chatMessages.push({
+      role: 'assistant',
+      content: result.assistant_message || 'Draft prepared.'
+    });
+    els.draft.value = result.draft || '';
+    els.confidence.textContent = `confidence: ${result.confidence || 'n/a'}`;
+    renderChat();
+    renderContext(state.contextResult);
+    persistSession();
+    if (result.draft && !result.skip_insert && !result.preserve_draft) {
+      await autoInsertReply(result.draft, { policy: 'auto' });
+    } else {
+      setStatus('Ready');
+    }
+  } catch (error) {
+    if (!isCurrentContext({ contextKey, requestId, type: 'chat' })) return;
+    setStatus('Error');
+    state.chatMessages.push({ role: 'assistant', content: error.message });
+    renderChat();
+    persistSession();
+  } finally {
+    setBusy(false);
+    updateButtons();
+  }
+}
+
+function preparedDraftKey(result = {}) {
+  return [result.id, result.chatwoot_message_id, result.updated_at].filter(Boolean).join(':');
 }
 
 async function sendAgentMessage(rawMessage) {
@@ -486,19 +634,24 @@ function createContextKey({ accountId, conversationId, contact }) {
 function isCurrentContext({ contextKey, requestId, type }) {
   if (contextKey !== state.contextKey) return false;
   if (type === 'chat') return requestId === state.chatRequestId;
+  if (type === 'preparedDraft') return requestId === state.preparedDraftRequestId;
   return requestId === state.contextRequestId;
 }
 
 function buildBasePayload() {
   const conversation = state.appContext?.conversation || {};
   const contact = state.appContext?.contact || conversation?.meta?.sender || {};
+  const latestMessage = latestIncomingMessageRecord(conversation.messages || []);
   return {
     account_id: conversation.account_id,
     conversation_id: conversation.display_id || conversation.id,
     conversation_display_id: conversation.display_id,
     selected_order_ref: state.selectedOrderRef,
     contact_email: contact.email,
-    latest_message: latestIncomingMessage(conversation.messages || []),
+    contact_phone: contact.phone_number || contact.phone || contact.additional_attributes?.phone_number || contact.additional_attributes?.phone,
+    country_code: contact.country_code || contact.additional_attributes?.country_code || contact.additional_attributes?.country,
+    latest_message: stripHtml(latestMessage?.content || ''),
+    latest_message_id: latestMessage?.id || '',
     agent_email: state.appContext?.currentAgent?.email,
     conversation
   };
@@ -972,10 +1125,13 @@ function setBusy(isBusy) {
 }
 
 function latestIncomingMessage(messages) {
-  const incoming = [...messages].reverse().find(message => {
-    return (message.message_type === 0 || message.message_type === 'incoming') && message.content;
-  });
-  return stripHtml(incoming?.content || '');
+  return stripHtml(latestIncomingMessageRecord(messages)?.content || '');
+}
+
+function latestIncomingMessageRecord(messages) {
+  return [...messages].reverse().find(message => {
+    return (message.message_type === 0 || message.message_type === '0' || message.message_type === 'incoming') && message.content;
+  }) || null;
 }
 
 function stripHtml(value) {

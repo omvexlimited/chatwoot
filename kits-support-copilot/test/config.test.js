@@ -21,6 +21,7 @@ test('supports Shopify Dev Dashboard client credentials aliases', () => {
     kits_internal_api: false,
     memory: false,
     chatwoot: false,
+    chatwoot_webhook: false,
     api_token_required: false
   });
 });
@@ -87,6 +88,15 @@ test('supports copilot memory database aliases', () => {
   assert.equal(config.copilotDatabaseUrl, 'postgres://memory');
   assert.equal(config.copilotDatabaseSsl, false);
   assert.equal(getConfigStatus(config).memory, true);
+});
+
+test('supports Chatwoot webhook secret', () => {
+  const config = loadConfig({
+    CHATWOOT_WEBHOOK_SECRET: 'webhook-secret'
+  });
+
+  assert.equal(config.chatwootWebhookSecret, 'webhook-secret');
+  assert.equal(getConfigStatus(config).chatwoot_webhook, true);
 });
 
 test('falls back to DATABASE_URL for copilot memory', () => {
