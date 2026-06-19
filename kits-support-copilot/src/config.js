@@ -1,6 +1,7 @@
 export function loadConfig(env = process.env) {
   const chatwootBaseUrl = trimTrailingSlash(envValue(env, ['CHATWOOT_BASE_URL']));
   const openaiBaseUrl = trimTrailingSlash(envValue(env, ['OPENAI_BASE_URL'], 'https://api.openai.com'));
+  const kitsRepublicDatabaseUrl = envValue(env, ['KITS_REPUBLIC_DATABASE_URL']);
   const shopifyStoreDomain = normalizeShopifyDomain(envValue(env, [
     'SHOPIFY_STORE_DOMAIN',
     'SHOPIFY_SHOP_DOMAIN',
@@ -15,8 +16,9 @@ export function loadConfig(env = process.env) {
     openaiApiKey: envValue(env, ['OPENAI_API_KEY']),
     openaiModel: envValue(env, ['OPENAI_MODEL'], 'gpt-5.5'),
     openaiBaseUrl,
-    copilotDatabaseUrl: envValue(env, ['COPILOT_DATABASE_URL', 'DATABASE_URL']),
-    copilotDatabaseSsl: envValue(env, ['COPILOT_DATABASE_SSL', 'DATABASE_SSL'], 'true').toLowerCase() !== 'false',
+    kitsRepublicDatabaseUrl,
+    copilotDatabaseUrl: kitsRepublicDatabaseUrl,
+    copilotDatabaseSsl: envValue(env, ['KITS_REPUBLIC_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
     kitsAdminBaseUrl: trimTrailingSlash(envValue(env, ['KITS_ADMIN_BASE_URL'], 'https://web-production-c1320.up.railway.app')),
     shopifyStoreDomain,
     shopifyAdminAccessToken: envValue(env, ['SHOPIFY_ADMIN_ACCESS_TOKEN', 'SHOPIFY_ADMIN_API_ACCESS_TOKEN']),
@@ -24,14 +26,14 @@ export function loadConfig(env = process.env) {
     shopifyClientSecret: envValue(env, ['SHOPIFY_CLIENT_SECRET', 'SHOPIFY_KITS_REPUBLIC_CLIENT_SECRET']),
     shopifyAuthModePreference: envValue(env, ['SHOPIFY_AUTH_MODE']).toLowerCase(),
     shopifyApiVersion: envValue(env, ['SHOPIFY_API_VERSION'], '2026-04'),
-    krAnalyticsDatabaseUrl: envValue(env, ['KR_ANALYTICS_DATABASE_URL', 'KITS_REPUBLIC_DATABASE_URL', 'KR_PROVIDER_DATABASE_URL']),
+    krAnalyticsDatabaseUrl: envValue(env, ['KR_ANALYTICS_DATABASE_URL']) || kitsRepublicDatabaseUrl || envValue(env, ['KR_PROVIDER_DATABASE_URL']),
     krAnalyticsStoreId: envValue(env, ['KR_ANALYTICS_STORE_ID', 'KR_PROVIDER_STORE_ID'], 'kits_republic'),
-    krAnalyticsDatabaseSsl: envValue(env, ['KR_ANALYTICS_DATABASE_SSL', 'KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
+    krAnalyticsDatabaseSsl: envValue(env, ['KR_ANALYTICS_DATABASE_SSL', 'KITS_REPUBLIC_DATABASE_SSL', 'KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
     krAnalyticsMinFulfilled: Number(envValue(env, ['KR_ANALYTICS_MIN_FULFILLED'], '20')),
     krAnalyticsMinDelivered: Number(envValue(env, ['KR_ANALYTICS_MIN_DELIVERED'], '10')),
-    krProviderDatabaseUrl: envValue(env, ['KR_PROVIDER_DATABASE_URL', 'KITS_REPUBLIC_DATABASE_URL']),
+    krProviderDatabaseUrl: kitsRepublicDatabaseUrl || envValue(env, ['KR_PROVIDER_DATABASE_URL']),
     krProviderStoreId: envValue(env, ['KR_PROVIDER_STORE_ID'], 'kits_republic'),
-    krProviderDatabaseSsl: envValue(env, ['KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
+    krProviderDatabaseSsl: envValue(env, ['KITS_REPUBLIC_DATABASE_SSL', 'KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
     kitsInternalApiToken: envValue(env, ['KITS_INTERNAL_API_TOKEN']),
     chatwootBaseUrl,
     chatwootAccountId: envValue(env, ['CHATWOOT_ACCOUNT_ID']),

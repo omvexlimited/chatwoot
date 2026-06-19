@@ -46,7 +46,7 @@ test('warns when provider database is not configured for a selected order', asyn
 
   assert.equal(result.available, false);
   assert.equal(result.reason, 'not_configured');
-  assert.match(result.warnings[0], /KR_PROVIDER_DATABASE_URL/);
+  assert.match(result.warnings[0], /KITS_REPUBLIC_DATABASE_URL/);
 });
 
 test('does not warn when there is no order for provider lookup', async () => {

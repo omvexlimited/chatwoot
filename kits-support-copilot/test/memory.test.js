@@ -92,6 +92,7 @@ test('returns clear memory not configured response for storage commands', async 
 
   assert.equal(result.handled, true);
   assert.match(result.assistant_message, /Memory is not configured/);
+  assert.match(result.assistant_message, /KITS_REPUBLIC_DATABASE_URL/);
 });
 
 test('runs /remember with injectable store without calling OpenAI', async () => {

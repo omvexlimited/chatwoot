@@ -9,7 +9,7 @@ export async function getAssignedProviders({ config, orders = [] }) {
   if (!config.krProviderDatabaseUrl) {
     return batchResult(
       'not_configured',
-      'Provider lookup is not configured. Set KR_PROVIDER_DATABASE_URL to the Kits Republic orders database.'
+      'Provider lookup is not configured. Set KITS_REPUBLIC_DATABASE_URL to the Kits Republic admin database.'
     );
   }
 

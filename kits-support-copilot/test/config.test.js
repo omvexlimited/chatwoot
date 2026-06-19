@@ -79,15 +79,35 @@ test('supports delivery analytics database aliases and thresholds', () => {
   assert.equal(getConfigStatus(config).delivery_analytics, true);
 });
 
-test('supports copilot memory database aliases', () => {
+test('uses Kits Republic admin database for copilot memory provider lookup and analytics', () => {
   const config = loadConfig({
-    COPILOT_DATABASE_URL: 'postgres://memory',
-    COPILOT_DATABASE_SSL: 'false'
+    KITS_REPUBLIC_DATABASE_URL: 'postgres://kits-admin',
+    KITS_REPUBLIC_DATABASE_SSL: 'false'
   });
 
-  assert.equal(config.copilotDatabaseUrl, 'postgres://memory');
+  assert.equal(config.kitsRepublicDatabaseUrl, 'postgres://kits-admin');
+  assert.equal(config.copilotDatabaseUrl, 'postgres://kits-admin');
+  assert.equal(config.krProviderDatabaseUrl, 'postgres://kits-admin');
+  assert.equal(config.krAnalyticsDatabaseUrl, 'postgres://kits-admin');
   assert.equal(config.copilotDatabaseSsl, false);
+  assert.equal(config.krProviderDatabaseSsl, false);
+  assert.equal(config.krAnalyticsDatabaseSsl, false);
   assert.equal(getConfigStatus(config).memory, true);
+  assert.equal(getConfigStatus(config).provider_lookup, true);
+  assert.equal(getConfigStatus(config).delivery_analytics, true);
+});
+
+test('does not enable copilot memory from legacy provider database only', () => {
+  const config = loadConfig({
+    KR_PROVIDER_DATABASE_URL: 'postgres://provider'
+  });
+
+  assert.equal(config.copilotDatabaseUrl, '');
+  assert.equal(config.krProviderDatabaseUrl, 'postgres://provider');
+  assert.equal(config.krAnalyticsDatabaseUrl, 'postgres://provider');
+  assert.equal(getConfigStatus(config).memory, false);
+  assert.equal(getConfigStatus(config).provider_lookup, true);
+  assert.equal(getConfigStatus(config).delivery_analytics, true);
 });
 
 test('supports Chatwoot webhook secret', () => {
@@ -97,15 +117,6 @@ test('supports Chatwoot webhook secret', () => {
 
   assert.equal(config.chatwootWebhookSecret, 'webhook-secret');
   assert.equal(getConfigStatus(config).chatwoot_webhook, true);
-});
-
-test('falls back to DATABASE_URL for copilot memory', () => {
-  const config = loadConfig({
-    DATABASE_URL: 'postgres://railway'
-  });
-
-  assert.equal(config.copilotDatabaseUrl, 'postgres://railway');
-  assert.equal(getConfigStatus(config).memory, true);
 });
 
 test('supports Kits admin base URL override', () => {

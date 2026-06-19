@@ -104,7 +104,7 @@ export async function runMemoryCommand({ command, config, context, agentEmail, s
   }
 
   if (!memoryConfigured(config)) {
-    return commandResponse('Memory is not configured. Add COPILOT_DATABASE_URL in Railway to enable /remember, /memories and /forget.');
+    return commandResponse('Memory is not configured. Configure KITS_REPUBLIC_DATABASE_URL with the Kits Republic admin database to enable /remember, /memories and /forget.');
   }
 
   if (command.name === 'remember') {
