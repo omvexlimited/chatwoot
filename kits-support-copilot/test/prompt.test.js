@@ -189,7 +189,7 @@ test('passes provider tracking context to prompt as logistics source', () => {
   assert.match(prompt.user, /Provider tracking context/);
   assert.match(prompt.user, /customs_clearance_completed/);
   assert.match(prompt.user, /Delivery Service Provider/);
-  assert.match(prompt.system, /Provider tracking context overrides Shopify\/17TRACK/);
+  assert.match(prompt.system, /Provider tracking context overrides generic Shopify tracking and public carrier status/);
   assert.match(prompt.system, /do not say the shipment is still in customs clearance/);
 });
 

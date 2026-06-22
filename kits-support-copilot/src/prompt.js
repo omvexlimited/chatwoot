@@ -307,9 +307,9 @@ function linkInstruction() {
 function providerTrackingInstruction() {
   return [
     'Provider tracking context rule:',
-    'Provider tracking context is internal tracking data fetched from the assigned Kits Republic provider portal.',
+    'Provider tracking context is internal tracking data fetched from the assigned Kits Republic provider lookup.',
     'When provider_tracking_context.available=true, use provider_tracking_context.normalized_status, customs_status, last_record, last_update_at, and latest_events as the best source for logistics status.',
-    'Provider tracking context overrides Shopify/17TRACK for customs and local handoff status, unless the agent explicitly gives a newer operational instruction.',
+    'Provider tracking context overrides generic Shopify tracking and public carrier status for customs and local handoff status, unless the agent explicitly gives a newer operational instruction.',
     'If provider_tracking_context.customs_status is customs_clearance_completed, do not say the shipment is still in customs clearance; say customs clearance has been completed and the parcel is moving toward or with the final/local delivery provider.',
     'If normalized_status is delivery_service_provider, in_transit_to_final_provider, or ready_for_final_service_provider, explain that the shipment is in the final handoff stage before local delivery and tracking should continue updating automatically.',
     'If customs_status is customs_clearance_in_progress, use the normal customs explanation.',
