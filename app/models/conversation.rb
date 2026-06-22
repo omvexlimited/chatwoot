@@ -52,6 +52,8 @@
 #
 
 class Conversation < ApplicationRecord
+  attr_accessor :skip_auto_assignment
+
   include Labelable
   include LlmFormattable
   include AssignmentHandler

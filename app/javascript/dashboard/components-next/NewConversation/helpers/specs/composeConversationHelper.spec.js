@@ -276,7 +276,6 @@ describe('composeConversationHelper', () => {
       targetInbox: { id: 1, sourceId: 'source1' },
       selectedContact: { id: '2' },
       message: 'Hello',
-      currentUser: { id: 3 },
     };
 
     it('prepares basic message payload', () => {
@@ -286,7 +285,7 @@ describe('composeConversationHelper', () => {
         sourceId: 'source1',
         contactId: 2,
         message: { content: 'Hello' },
-        assigneeId: 3,
+        skipAutoAssignment: true,
       });
     });
 
@@ -319,7 +318,6 @@ describe('composeConversationHelper', () => {
         selectedContact: { id: 2 },
         message: 'Hello',
         templateParams: { param1: 'value1' },
-        currentUser: { id: 3 },
       };
 
       const result = helpers.prepareWhatsAppMessagePayload(params);
@@ -331,7 +329,7 @@ describe('composeConversationHelper', () => {
           content: 'Hello',
           template_params: { param1: 'value1' },
         },
-        assigneeId: 3,
+        skipAutoAssignment: true,
       });
     });
   });

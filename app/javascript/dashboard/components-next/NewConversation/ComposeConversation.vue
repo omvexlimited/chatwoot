@@ -65,7 +65,6 @@ const clearFormState = () => {
 
 const contactById = useMapGetter('contacts/getContactById');
 const contactsUiFlags = useMapGetter('contacts/getUIFlags');
-const currentUser = useMapGetter('getCurrentUser');
 const globalConfig = useMapGetter('globalConfig/get');
 const uiFlags = useMapGetter('contactConversations/getUIFlags');
 const messageSignature = useMapGetter('getMessageSignature');
@@ -246,7 +245,6 @@ onMounted(() => resetContacts());
         :contacts="contacts"
         :contact-id="contactId"
         :is-loading="isSearching"
-        :current-user="currentUser"
         :selected-contact="selectedContact"
         :target-inbox="targetInbox"
         :is-creating-contact="isCreatingContact"

@@ -126,7 +126,6 @@ export const prepareNewMessagePayload = ({
   subject,
   ccEmails,
   bccEmails,
-  currentUser,
   attachedFiles = [],
   directUploadsEnabled = false,
 }) => {
@@ -135,7 +134,7 @@ export const prepareNewMessagePayload = ({
     sourceId: targetInbox.sourceId,
     contactId: Number(selectedContact.id),
     message: { content: message },
-    assigneeId: currentUser.id,
+    skipAutoAssignment: true,
   };
 
   if (attachedFiles?.length) {
@@ -165,14 +164,13 @@ export const prepareWhatsAppMessagePayload = ({
   selectedContact,
   message,
   templateParams,
-  currentUser,
 }) => {
   return {
     inboxId: targetInbox.id,
     sourceId: targetInbox.sourceId,
     contactId: selectedContact.id,
     message: { content: message, template_params: templateParams },
-    assigneeId: currentUser.id,
+    skipAutoAssignment: true,
   };
 };
 

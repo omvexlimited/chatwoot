@@ -29,6 +29,15 @@ describe ConversationBuilder do
       expect(conversation.contact_inbox_id).to eq(contact_api_inbox.id)
     end
 
+    it 'passes skip_auto_assignment to the conversation' do
+      conversation = described_class.new(
+        contact_inbox: contact_api_inbox,
+        params: { skip_auto_assignment: true }
+      ).perform
+
+      expect(conversation.skip_auto_assignment).to be(true)
+    end
+
     context 'when lock_to_single_conversation is true for sms inbox' do
       before do
         sms_inbox.update!(lock_to_single_conversation: true)
