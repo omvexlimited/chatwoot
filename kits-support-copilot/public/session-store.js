@@ -1,4 +1,19 @@
 const PREFIX = 'kr-copilot-session-v1';
+const MAX_STORED_MESSAGES = 20;
+const MAX_STORED_WARNINGS = 5;
+const CONTEXT_SUMMARY_KEYS = [
+  'customer',
+  'order',
+  'status',
+  'selected_order_ref',
+  'order_created_at',
+  'shipment_status',
+  'tracking_number',
+  'tracking_carrier',
+  'tracking_url',
+  'response_language',
+  'support_case'
+];
 
 export function createStorageKey({ accountId, conversationId }) {
   if (!accountId || !conversationId) return '';
@@ -16,7 +31,13 @@ export function loadSession(storage, key) {
 
 export function saveSession(storage, key, session) {
   if (!storage || !key) return;
-  storage.setItem(key, JSON.stringify(normalizeSession(session)));
+  const normalized = normalizeSession(session);
+  if (trySetSession(storage, key, normalized)) return;
+
+  pruneStoredSessions(storage, key);
+  if (trySetSession(storage, key, normalized)) return;
+
+  trySetSession(storage, key, minimalSession(normalized));
 }
 
 export function clearSession(storage, key) {
@@ -28,7 +49,7 @@ export function normalizeSession(session = {}) {
   return {
     chatMessages: normalizeMessages(session.chatMessages),
     draft: String(session.draft || ''),
-    lastResult: session.lastResult && typeof session.lastResult === 'object' ? session.lastResult : null,
+    lastResult: normalizeLastResult(session.lastResult),
     selectedOrderRef: normalizeOrderRef(session.selectedOrderRef),
     pendingIssue: normalizePendingIssue(session.pendingIssue),
     updatedAt: session.updatedAt || new Date().toISOString()
@@ -59,7 +80,98 @@ function normalizeMessages(messages) {
       content: String(message?.content || '').trim()
     }))
     .filter(message => message.content)
-    .slice(-40);
+    .slice(-MAX_STORED_MESSAGES);
+}
+
+function normalizeLastResult(value) {
+  if (!value || typeof value !== 'object') return null;
+
+  const result = {};
+  copyString(value, result, 'contact_email');
+  copyString(value, result, 'confidence');
+  copyString(value, result, 'reasoning_summary');
+
+  const warnings = normalizeStringArray(value.warnings).slice(0, MAX_STORED_WARNINGS);
+  if (warnings.length) result.warnings = warnings;
+
+  const contextSummary = normalizeContextSummary(value.context_summary);
+  if (contextSummary) result.context_summary = contextSummary;
+
+  return Object.keys(result).length ? result : null;
+}
+
+function normalizeContextSummary(value) {
+  if (!value || typeof value !== 'object') return null;
+
+  const summary = {};
+  for (const key of CONTEXT_SUMMARY_KEYS) {
+    const clean = normalizeStoredValue(value[key]);
+    if (clean !== undefined) summary[key] = clean;
+  }
+
+  return Object.keys(summary).length ? summary : null;
+}
+
+function normalizeStoredValue(value) {
+  if (value === null || value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    const result = value.map(normalizeStoredValue).filter(item => item !== undefined);
+    return result.length ? result : undefined;
+  }
+  if (typeof value === 'object') {
+    const result = {};
+    for (const [key, child] of Object.entries(value)) {
+      const clean = normalizeStoredValue(child);
+      if (clean !== undefined) result[key] = clean;
+    }
+    return Object.keys(result).length ? result : undefined;
+  }
+
+  const clean = String(value).trim();
+  return clean ? clean : undefined;
+}
+
+function copyString(source, target, key) {
+  const clean = String(source?.[key] || '').trim();
+  if (clean) target[key] = clean;
+}
+
+function trySetSession(storage, key, session) {
+  try {
+    storage.setItem(key, JSON.stringify(session));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pruneStoredSessions(storage, activeKey) {
+  if (!Number.isInteger(storage?.length) || typeof storage.key !== 'function') return;
+
+  const keys = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(`${PREFIX}:`) && key !== activeKey) keys.push(key);
+  }
+
+  for (const key of keys) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Ignore unavailable localStorage entries; the retry path will decide.
+    }
+  }
+}
+
+function minimalSession(session) {
+  return {
+    chatMessages: [],
+    draft: session.draft || '',
+    lastResult: null,
+    selectedOrderRef: session.selectedOrderRef || '',
+    pendingIssue: null,
+    updatedAt: session.updatedAt || new Date().toISOString()
+  };
 }
 
 function normalizePendingIssue(value) {
