@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KR Copilot</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div class="titleBlock">
+          <h1>KR Copilot</h1>
+          <p id="conversationLabel">Waiting for context...</p>
+        </div>
+        <span id="status" class="status">Idle</span>
+      </header>
+
+      <section class="contextBar" aria-label="Context">
+        <div>
+          <span class="label">Order</span>
+          <strong id="orderStatus">-</strong>
+        </div>
+      </section>
+
+      <section class="chatPanel" aria-label="Copilot chat">
+        <div id="chatLog" class="chatLog"></div>
+        <div id="insertNotice" class="insertNotice" hidden>
+          <span id="insertNoticeText"></span>
+          <button id="copyLatestButton" type="button">Copy latest</button>
+        </div>
+        <form id="chatForm" class="composer">
+          <div id="commandMenu" class="commandMenu" role="listbox" aria-label="Copilot commands" hidden></div>
+          <textarea id="chatInput" rows="2" placeholder="Message the copilot..."></textarea>
+          <button id="newDraftButton" type="button" class="secondary newDraftButton">New draft</button>
+          <button id="sendButton" type="submit">Send</button>
+        </form>
+      </section>
+
+      <div
+        id="splitHandle"
+        class="splitHandle"
+        role="separator"
+        aria-label="Resize chat and context panels"
+        aria-orientation="horizontal"
+        tabindex="0"
+      >
+        <span aria-hidden="true"></span>
+      </div>
+
+      <section class="draftPanel" aria-label="Draft">
+        <div class="panelHeader">
+          <h2>Draft</h2>
+          <span id="confidence" class="pill">confidence: n/a</span>
+        </div>
+        <textarea id="draft" rows="9" placeholder="The draft will appear here."></textarea>
+        <div class="actions">
+          <button id="prepareButton" type="button" disabled>Insert reply</button>
+          <button id="copyButton" type="button" disabled>Copy</button>
+          <button id="noteButton" type="button" disabled>Save private note</button>
+          <button id="resetButton" type="button" disabled>Clear chat</button>
+        </div>
+      </section>
+
+      <section class="detailsPanel" aria-label="Context details">
+        <div class="panelHeader">
+          <h2>Context</h2>
+          <div class="tabs" role="tablist" aria-label="Context views">
+            <button id="summaryTab" type="button" class="tab active" data-context-tab="summary" aria-selected="true">Summary</button>
+            <button id="rawTab" type="button" class="tab" data-context-tab="raw" aria-selected="false">Raw</button>
+          </div>
+        </div>
+        <div id="contextSummary" class="contextSummary"></div>
+        <pre id="contextBox" class="contextRaw" hidden>No context yet.</pre>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

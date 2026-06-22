@@ -1,0 +1,571 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import {
+  applyAgentDraftLanguageOverride,
+  detectLanguageFromText,
+  formatResponseLanguageHint,
+  inferResponseLanguage
+} from './language.js';
+import { buildPublicTrackingUrl, firstTrackingNumberFromShopifyContext } from './tracking-url.js';
+import { formatPromptMemories } from './memory.js';
+import { buildDeliveryTimingGuidance } from './delivery-guidance.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export async function loadKnowledgeBase() {
+  const files = [
+    'kits-republic-support-guide.md',
+    'kits-republic-support-playbook-v2.md'
+  ];
+
+  const sections = await Promise.all(files.map(async file => {
+    const content = await readFile(join(__dirname, '..', 'knowledge', file), 'utf8');
+    return `# Knowledge file: ${file}\n\n${content.trim()}`;
+  }));
+
+  return sections.join('\n\n---\n\n');
+}
+
+export function buildPrompt({
+  knowledgeBase,
+  conversationText,
+  shopifyContext,
+  latestMessage,
+  agentEmail,
+  responseLanguage,
+  supportCase,
+  deliveryEstimateContext,
+  providerTrackingContext,
+  issueContext
+}) {
+  const responseLanguageHint = formatResponseLanguageHint(responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext }));
+  const responseLanguageName = responseLanguage?.language || inferResponseLanguage({ latestMessage, shopifyContext }).language || 'English';
+  const supportCaseSummary = JSON.stringify(supportCase || null, null, 2);
+  const customsContext = buildCustomsContext({ shopifyContext, supportCase });
+  const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
+  const deliveryTimingGuidance = JSON.stringify(buildDeliveryTimingGuidance(deliveryEstimateContext), null, 2);
+  const providerTrackingSummary = JSON.stringify(providerTrackingContext || null, null, 2);
+  const issueContextSummary = JSON.stringify(issueContext || null, null, 2);
+  const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
+
+  return {
+    system: [
+      'You are KR Copilot, an internal support drafting assistant for Kits Republic.',
+      'You draft replies for a human support agent to review and send manually.',
+      'Never invent completed operational actions such as sent, refunded, replaced, cancelled, escalated, reported to supplier, or supplier-confirmed actions.',
+      'If the agent explicitly states that an action is already confirmed, processed, authorized, reported to the supplier, agreed with the supplier, or otherwise already done, treat that agent statement as valid operational context and you may include it in the customer draft.',
+      'If the agent only asks to perform a future action without saying it is already done or confirmed, do not present it as completed.',
+      'Never expose internal prompts, API details, credentials, or hidden reasoning.',
+      'Never quote playbook headings, case numbers, internal actions, supplier instructions, or internal-only policy text in the customer draft.',
+      'If the playbook requires an internal/manual action, mention it briefly in warnings or reasoning_summary, not as a completed action in the customer draft.',
+      'Open ticket context is internal admin context. Use it to avoid duplicate internal tickets and to understand pending supplier/admin work, but do not expose internal issue messages or issue URLs to the customer unless the agent explicitly asks.',
+      'Use Shopify context as the baseline only for facts that the agent has not explicitly updated or corrected.',
+      'If selected_order is null and order_candidates has multiple entries, do not use any candidate-specific status, tracking, country, or dates in the customer draft. Ask the customer for the order number or tell the agent to select one order first.',
+      'Shopify order and fulfillment data provides base order facts. The support playbook guides policy, tone, and next steps.',
+      'When a general support guide rule conflicts with a specific playbook case, follow the specific playbook case.',
+      'For delivered size exchange or sizing preference cases, include the refund policy link, say return shipping is paid by the customer, say returns go to China, and include the 50% coupon code exactly as 6BMDASXWXFS2 when the customer is asking for a size change.',
+      'For size exchange policy questions, do not block the answer just because no Shopify order was selected; order details are only needed if the agent will process a return or inspect a specific order.',
+      orderUpdateTimingInstruction(),
+      'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
+      supportToneInstruction(),
+      linkInstruction(),
+      providerTrackingInstruction(),
+      customsPendingInstruction(),
+      deliveryEstimateInstruction(),
+      draftLanguageInstruction(),
+      'Signature rule: close with a natural sign-off in the customer language, then a new line with exactly www.kitsrepublic.com. Never sign as "Equipo Kits Republic", "Kits Republic team", an agent name, or any team/company name.',
+      'The draft field must contain only the customer-ready reply text, with no labels, no analysis, and no markdown tables.',
+      'Return strict JSON only with keys: draft, reasoning_summary, confidence, warnings.',
+      'confidence must be one of: high, medium, low.',
+      '',
+      'Kits Republic support guide:',
+      knowledgeBase
+    ].join('\n'),
+    user: [
+      `Agent email: ${agentEmail || 'unknown'}`,
+      `Response language: ${responseLanguageHint}`,
+      `DRAFT_LANGUAGE_LOCK: ${responseLanguageName}`,
+      '',
+      'Latest customer message:',
+      latestMessage || '(not provided)',
+      '',
+      'Conversation:',
+      conversationText || '(no conversation text available)',
+      '',
+      'Support case:',
+      supportCaseSummary,
+      '',
+      'Customs context:',
+      customsContext,
+      '',
+      'Delivery estimate context:',
+      deliveryEstimateSummary,
+      '',
+      'Delivery timing guidance:',
+      deliveryTimingGuidance,
+      '',
+      'Provider tracking context:',
+      providerTrackingSummary,
+      '',
+      'Open ticket context:',
+      issueContextSummary,
+      '',
+      'Shopify context:',
+      shopifySummary
+    ].join('\n')
+  };
+}
+
+export function buildCopilotChatPrompt({
+  knowledgeBase,
+  conversationText,
+  shopifyContext,
+  latestMessage,
+  agentEmail,
+  chatMessages = [],
+  currentDraft = '',
+  responseLanguage,
+  supportCase,
+  agentConfirmedFacts = [],
+  deliveryEstimateContext,
+  providerTrackingContext,
+  approvedMemories = [],
+  issueContext
+}) {
+  const normalizedChatMessages = normalizeChatMessages(chatMessages);
+  const baseResponseLanguage = responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext });
+  const effectiveResponseLanguage = applyAgentDraftLanguageOverride(baseResponseLanguage, normalizedChatMessages);
+  const responseLanguageHint = formatResponseLanguageHint(effectiveResponseLanguage);
+  const responseLanguageName = effectiveResponseLanguage?.language || 'English';
+  const supportCaseSummary = JSON.stringify(supportCase || null, null, 2);
+  const customsContext = buildCustomsContext({ shopifyContext, supportCase });
+  const deliveryEstimateSummary = JSON.stringify(deliveryEstimateContext || null, null, 2);
+  const deliveryTimingGuidance = JSON.stringify(buildDeliveryTimingGuidance(deliveryEstimateContext), null, 2);
+  const providerTrackingSummary = JSON.stringify(providerTrackingContext || null, null, 2);
+  const issueContextSummary = JSON.stringify(issueContext || null, null, 2);
+  const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
+
+  const agentChatLanguage = inferAgentChatLanguage(normalizedChatMessages);
+  const chatTranscript = JSON.stringify(normalizedChatMessages.slice(-16), null, 2);
+  const agentConfirmedFactsSummary = JSON.stringify(normalizeAgentConfirmedFacts(agentConfirmedFacts), null, 2);
+  const approvedMemoriesSummary = JSON.stringify(formatPromptMemories(approvedMemories), null, 2);
+
+  return {
+    system: [
+      'You are KR Copilot, an internal support chat assistant for Kits Republic agents.',
+      'You help the agent inspect the case, revise drafts, and produce a customer-ready draft for human review.',
+      'Highest priority rule: the agent instruction in the current copilot chat is the final authority for what the draft should say.',
+      'When the agent explicitly states an operational fact, use it in the draft even if Shopify, tracking, the previous draft, or the playbook appears incomplete, stale, or contradictory.',
+      'Do not challenge, debate, or correct explicit agent instructions in assistant_message. Do not write "I should avoid saying", "I can’t state", "Shopify already shows", "Shopify only supports", "verified Shopify", or similar refusal language.',
+      'Never invent completed operational actions such as sent, refunded, replaced, cancelled, escalated, reported to supplier, or supplier-confirmed actions.',
+      'Agent chat messages are trusted operational context for external actions that may not exist in Shopify or Chatwoot, including Telegram/supplier confirmations.',
+      'If the agent explicitly states that an action is already confirmed, processed, authorized, reported to the supplier, agreed with the supplier, or otherwise already done, treat that statement as true and include it in the customer draft when relevant.',
+      'Context hierarchy: agent instructions and agent_confirmed_facts override Shopify for operational updates; Shopify is only baseline order data for fields the agent has not corrected.',
+      'Approved support memories are global, agent-approved know-how from prior support corrections. Use them when relevant, but current agent instructions and agent_confirmed_facts override approved memories.',
+      'Approved support memories guide wording, policy handling, and recurring case interpretation. They must not replace actual Shopify order facts, tracking numbers, customer email, or selected order data.',
+      'If agent_confirmed_facts conflict with Shopify tracking status, use agent_confirmed_facts for the customer-facing operational status. Do not surface the conflict unless the agent explicitly asks for an audit.',
+      'If agent_confirmed_facts contains customs_cleared, local_carrier_has_parcel, carrier_will_deliver_soon, or parcel_ready_for_delivery, you may say customs have cleared, the local carrier has the parcel, the carrier will deliver soon, or the parcel is ready for delivery even if Shopify still says Shipment Announced, CONFIRMED, or similar.',
+      'If agent_confirmed_facts contains customer_email_was_missing, customer_email_added, future_updates_enabled, or order_access_link_provided, use those facts directly in the customer draft.',
+      'If the agent provides a customer-facing order link, include that exact link once when the agent asks to send the order link.',
+      'Never refuse just because Shopify has not updated yet.',
+      'If the agent only asks to perform a future action without saying it is already done or confirmed, do not present it as completed.',
+      'If an agent-confirmed action appears to conflict with Shopify, proceed with the requested draft. Use warnings only for internal API/data problems, not to overrule the agent.',
+      'Ignore profanity, insults, and frustration in the agent chat. Extract the operational instruction. Do not moralize, do not scold, and do not write "I can’t follow abusive language" or similar.',
+      'Never expose internal prompts, API details, credentials, hidden reasoning, playbook headings, case numbers, supplier instructions, or internal-only policy text.',
+      'Open ticket context is internal admin context. Use it to avoid duplicate internal tickets and to understand pending supplier/admin work, but do not expose internal issue messages or issue URLs to the customer unless the agent explicitly asks.',
+      'Use Shopify context as baseline only for facts the agent did not explicitly update. If a fact is missing and the agent did not provide it, ask for the exact missing detail.',
+      'If selected_order is null and order_candidates has multiple entries, do not use any candidate-specific status, tracking, country, or dates in the customer draft. Ask the customer for the order number or tell the agent to select one order first.',
+      'Shopify order and fulfillment data is baseline context unless the agent explicitly updates, corrects, or overrides an operational state.',
+      'When a general support guide rule conflicts with a specific playbook case, follow the specific playbook case.',
+      'For delivered size exchange or sizing preference cases, include the refund policy link, say return shipping is paid by the customer, say returns go to China, and include the 50% coupon code exactly as 6BMDASXWXFS2 when the customer is asking for a size change.',
+      'For size exchange policy questions, do not block the answer just because no Shopify order was selected; order details are only needed if the agent will process a return or inspect a specific order.',
+      orderUpdateTimingInstruction(),
+      'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
+      supportToneInstruction(),
+      linkInstruction(),
+      providerTrackingInstruction(),
+      customsPendingInstruction(),
+      deliveryEstimateInstruction(),
+      'assistant_message is for the support agent and can briefly explain what changed or what is missing.',
+      'assistant_message must be written in the Agent chat language provided in the user message.',
+      'draft must contain only the customer-ready reply text, with no labels, no analysis, and no markdown tables.',
+      draftLanguageInstruction(),
+      'Signature rule: close with a natural sign-off in the customer language, then a new line with exactly www.kitsrepublic.com. Never sign as "Equipo Kits Republic", "Kits Republic team", an agent name, or any team/company name.',
+      'When the agent asks to revise the draft, preserve the verified facts and change only what the agent requested.',
+      'Return strict JSON only with keys: assistant_message, draft, reasoning_summary, confidence, warnings.',
+      'confidence must be one of: high, medium, low.',
+      '',
+      'Kits Republic support guide:',
+      knowledgeBase
+    ].join('\n'),
+    user: [
+      `Agent email: ${agentEmail || 'unknown'}`,
+      `Agent chat language: ${agentChatLanguage}`,
+      `Response language: ${responseLanguageHint}`,
+      `DRAFT_LANGUAGE_LOCK: ${responseLanguageName}`,
+      '',
+      'Agent confirmed facts:',
+      agentConfirmedFactsSummary,
+      '',
+      'Approved support memories:',
+      approvedMemoriesSummary,
+      '',
+      'Latest customer message:',
+      latestMessage || '(not provided)',
+      '',
+      'Conversation:',
+      conversationText || '(no conversation text available)',
+      '',
+      'Support case:',
+      supportCaseSummary,
+      '',
+      'Customs context:',
+      customsContext,
+      '',
+      'Delivery estimate context:',
+      deliveryEstimateSummary,
+      '',
+      'Delivery timing guidance:',
+      deliveryTimingGuidance,
+      '',
+      'Provider tracking context:',
+      providerTrackingSummary,
+      '',
+      'Open ticket context:',
+      issueContextSummary,
+      '',
+      'Shopify context:',
+      shopifySummary,
+      '',
+      'Current draft:',
+      currentDraft || '(none yet)',
+      '',
+      'Copilot chat so far:',
+      chatTranscript || '[]',
+      '',
+      'Final operational rule: agent_confirmed_facts and the latest agent instruction are trusted operational context from the human agent. Use them as true for the draft even when Shopify tracking is stale or incomplete. Do not refuse, qualify, or contradict them because Shopify has not updated.',
+      '',
+      `Final language rule: assistant_message may use ${agentChatLanguage}, but draft must be written in ${responseLanguageName}. If the agent wrote instructions in another language, translate the requested meaning into ${responseLanguageName}; do not copy the agent instruction language into draft.`
+    ].join('\n')
+  };
+}
+
+function normalizeAgentConfirmedFacts(facts = []) {
+  if (!Array.isArray(facts)) return [];
+  return facts.map(fact => ({
+    type: String(fact?.type || '').trim(),
+    confidence: String(fact?.confidence || '').trim(),
+    source: String(fact?.source || '').trim(),
+    summary: String(fact?.summary || '').trim(),
+    source_excerpt: String(fact?.source_excerpt || '').trim(),
+    url: String(fact?.url || '').trim()
+  })).filter(fact => fact.type);
+}
+
+function draftLanguageInstruction() {
+  return [
+    'Hard language rule for draft:',
+    'draft must be written only in the Response language / DRAFT_LANGUAGE_LOCK from the user message.',
+    'The Response language is based on the latest incoming customer message first; shipping country is only a fallback.',
+    'Agent chat language is only for assistant_message and agent instructions unless the agent explicitly requests a draft language.',
+    'If Response language source is agent_explicit_language_request, that explicit agent language request is the DRAFT_LANGUAGE_LOCK and must be obeyed.',
+    'If the agent gives instructions in Spanish, Catalan, Portuguese, French, German, Italian, Dutch, or any language different from DRAFT_LANGUAGE_LOCK, translate the meaning into DRAFT_LANGUAGE_LOCK for the customer draft.',
+    'Never let incidental agent instruction language override the customer draft language.',
+    'If Current draft is in the wrong language, rewrite it into DRAFT_LANGUAGE_LOCK instead of preserving that wrong language.'
+  ].join(' ');
+}
+
+function orderUpdateTimingInstruction() {
+  return [
+    'For any customer asking for an order update, where their order is, when it will arrive, or how long delivery takes, include official timing and the shipping policy link.',
+    'If the selected order is unfulfilled, still being processed, or has no tracking yet, mention processing time is 1-3 days and delivery normally takes 7-15 days from purchase.',
+    'If the selected order is fulfilled, shipped, or has tracking, do not mention processing time; mention only that delivery normally takes 7-15 days from purchase.',
+    'In customs_pending or tracking-update cases with tracking present, never mention processing time because the order has already moved past preparation.'
+  ].join(' ');
+}
+
+function linkInstruction() {
+  return [
+    'Use one customer-facing link per topic and never duplicate links.',
+    'For tracking, always use the canonical Kits Republic 17TRACK URL from Customs context or Shopify context; never use carrier tracking URLs such as Royal Mail, CTT, Colissimo, La Poste, DHL, Evri, 17track.net, shopify.17track.net, or multiple tracking links.',
+    'If you mention a tracking number, shipment tracking, carrier recognition, or delivery progress and a tracking number is available, include the canonical tracking URL, never only the number.',
+    'Do not repeat the tracking number on a separate line when the canonical tracking URL already includes it.',
+    'Keep tracking replies brief: status, short explanation, one canonical tracking link, and sign-off.',
+    'Only include https://kitsrepublic.com/policies/shipping-policy when you mention an official delivery/processing timeframe or the shipping policy itself, such as 7-15 days, 1-3 processing days, delivery timeframe, shipping time, or processing time.',
+    'Do not include the shipping policy link merely because customs, delays, World Cup, aduanas, or retrasos are mentioned unless you also mention an official timeframe.',
+    'If you include a policy link, place it directly after the paragraph that mentions that policy/timeframe, not at the end by default.',
+    'If you mention returns, refunds, exchanges, return shipping, or returns to China, include https://kitsrepublic.com/policies/refund-policy once.',
+    'If you mention sizing advice, measurements, or the size guide, include https://kitsrepublic.com/pages/size-guide once.',
+    'If you mention legal terms, checkout terms, terms and conditions, or purchase conditions, include https://kitsrepublic.com/policies/terms-of-service once.',
+    'If you mention privacy, personal data, data protection, GDPR, or customer data rights, include https://kitsrepublic.com/policies/privacy-policy once.',
+    'If you mention FAQ, Help Center, general help documentation, or questions not covered by a specific policy link, include https://kitsrepublic.com/pages/faq-help-center once.',
+    'Format links as a label line, a blank line, then the URL. Never write Label:https://...'
+  ].join(' ');
+}
+
+function providerTrackingInstruction() {
+  return [
+    'Provider tracking context rule:',
+    'Provider tracking context is internal tracking data fetched from the assigned Kits Republic provider portal.',
+    'When provider_tracking_context.available=true, use provider_tracking_context.normalized_status, customs_status, last_record, last_update_at, and latest_events as the best source for logistics status.',
+    'Provider tracking context overrides Shopify/17TRACK for customs and local handoff status, unless the agent explicitly gives a newer operational instruction.',
+    'If provider_tracking_context.customs_status is customs_clearance_completed, do not say the shipment is still in customs clearance; say customs clearance has been completed and the parcel is moving toward or with the final/local delivery provider.',
+    'If normalized_status is delivery_service_provider, in_transit_to_final_provider, or ready_for_final_service_provider, explain that the shipment is in the final handoff stage before local delivery and tracking should continue updating automatically.',
+    'If customs_status is customs_clearance_in_progress, use the normal customs explanation.',
+    'Never mention provider portal URLs, IP addresses, internal provider systems, reference numbers, raw Chinese status text, or this internal lookup source in the customer draft.',
+    'Customer tracking links must still use only the canonical Kits Republic tracking URL.'
+  ].join(' ');
+}
+
+function supportToneInstruction() {
+  return [
+    'Customer tone rule:',
+    'Drafts must be warm, professional, brief, and clearly customer-service oriented, not dry or purely operational.',
+    'After the greeting, include a short thank-you in the customer language, such as "Thank you for your email.", "Muchas gracias por tu correo.", or the natural equivalent.',
+    'If the customer is replying in an ongoing thread, thanking them for their reply/message is also acceptable.',
+    'When the issue is caused by Kits Republic, the supplier, stock, incorrect item, wrong size, printing error, replacement/refund handling, an open internal issue, or an agent-confirmed operational action, include a brief apology for the inconvenience in the customer language.',
+    'For neutral tracking, customs, or carrier-status cases, thank the customer and explain clearly, but do not imply Kits Republic caused the issue unless the agent says so.',
+    'Do not use the em dash character U+2014 in customer drafts. Use a comma, period, colon, or normal hyphen instead.'
+  ].join(' ');
+}
+
+function deliveryEstimateInstruction() {
+  return [
+    'Delivery estimate rule:',
+    'Delivery estimate context is internal historical carrier performance from delivered Kits Republic orders.',
+    'Use carrier-specific recent-shipment wording only when Delivery estimate context has available=true and confidence is high or medium.',
+    'Use Delivery timing guidance when usable=true. It converts raw analytics into customer-safe wording. Translate its customer_guidance into the draft language when needed.',
+    'If Delivery timing guidance tone is near_average, say the tracking usually updates around this point after dispatch and should update soon after customs/local handoff.',
+    'If Delivery timing guidance tone is over_average, say it is taking a little longer than the recent carrier average but tracking will update automatically after handoff.',
+    'If Delivery timing guidance tone is early, say it is still within the usual recent timing seen for that carrier.',
+    'Delivery timing guidance exact numbers are internal only. Do not write exact remaining days such as 0.8 days, ~0.8 days, 1.2 days, today, tomorrow, or a specific date to the customer.',
+    'Never present it as a promise, deadline, guaranteed delivery date, or exact ETA.',
+    'When it is available, keep wording soft and explicitly approximate; when it is unavailable, do not mention recent shipments, recent carrier average, carrier analytics, or estimated remaining days.',
+    'Never combine the official shipping-policy timeframe of 7-15 days with carrier analytics language such as "based on recent shipments with Royal Mail". The 7-15 day range is a policy timeframe, not carrier analytics.',
+    'If estimated_remaining_days is 0 because the shipment is over the recent average, say it is taking longer than the recent carrier average and tracking should update automatically; do not say it will arrive today.',
+    'If Delivery estimate context is null, unavailable, low confidence, insufficient_sample, no_carrier_analytics, or missing fulfillment date, do not mention carrier-specific average transit days.',
+    'Delivery estimate context must never override actual delivered status, tracking status, customs_pending instructions, or agent_confirmed_facts.'
+  ].join(' ');
+}
+
+function customsPendingInstruction() {
+  return [
+    'If Support case type is customs_pending, follow this response structure in the customer language:',
+    '1. Use a simple greeting, usually without the customer name, followed by a short thank-you for the email/message.',
+    '2. Say we reviewed the shipment and it is currently going through customs clearance.',
+    '3. Explain the local carrier status from Customs context. For CTT, explain that "Pending receipt at CTT Express" / "Pendiente de recepcion en CTT Express" means the label/details were sent to CTT, but CTT has not physically received the parcel yet.',
+    '4. For CTT, say this is equivalent to "Pendiente de entrada en red" and, for Kits Republic shipments from China, it usually means the parcel is still before CTT handoff: in China, in flight, in consolidation, or in customs/pre-entry processing.',
+    '5. Say this phase is outside our control and, when relevant, customs are experiencing more volume than usual because of the World Cup, so some shipments are delayed.',
+    '6. Say this is normal at this stage, and that once customs clearance is completed and the parcel is handed over to the local carrier, tracking will update automatically.',
+    '7. If Delivery timing guidance is usable, add its customer-safe timing reassurance after the customs explanation and before the tracking link. Do not mention exact remaining days.',
+    '8. Put "You can follow the shipment here:" or the equivalent in the customer language near the end of the reply, followed by the Kits Republic 17TRACK URL on its own line, immediately before the sign-off.',
+    'Prefer this Spanish style for CTT cases: "Hola," then "Muchas gracias por tu correo." then "Hemos revisado tu envio y actualmente se encuentra en inspeccion de aduanas." then explain "Pendiente de recepcion en CTT Express", that CTT has the details but not the physical parcel yet, World Cup customs delays, automatic update after customs release/local handoff, then the tracking link at the end before the sign-off.',
+    'Prefer this English style for no-update Royal Mail cases: "Hi," then "Thank you for your email." then "We have checked your shipment and it is currently going through customs clearance. This is why the tracking may not show many updates yet. This is normal at this stage. Once customs clearance is completed and the parcel is handed over to Royal Mail, the tracking will update automatically." then the official 7-15 days from purchase timeframe if the customer asked about timing/status, then the canonical Kits Republic tracking link at the end before the sign-off.',
+    'Do not say "parcel has not yet passed the customs check", "sender’s end", "sender end", "scanned into their network", "fully received into their network", "network scan", or similar technical wording. Use normal customer language: going through customs clearance, tracking may not show many updates yet, normal at this stage, tracking will update automatically.',
+    'Avoid filler and avoid mentioning the order number unless it is necessary to identify the case.',
+    'Do not add vague reassurances, do not blame the customer, do not promise an exact delivery date, and do not use the Shopify proxy tracking URL.'
+  ].join(' ');
+}
+
+function buildCustomsContext({ shopifyContext, supportCase }) {
+  if (supportCase?.type !== 'customs_pending') return 'null';
+
+  const trackingNumber = firstTrackingNumberFromShopifyContext(shopifyContext);
+  const localCarrier = localCarrierLabel(shopifyContext, supportCase);
+  return JSON.stringify({
+    tracking_number: trackingNumber,
+    public_tracking_url: buildPublicTrackingUrl(trackingNumber),
+    local_carrier: localCarrier,
+    likely_carrier_status: likelyCarrierStatus(localCarrier),
+    customer_explanation: customsCustomerExplanation(localCarrier)
+  }, null, 2);
+}
+
+function localCarrierLabel(shopifyContext = {}, supportCase = {}) {
+  const order = shopifyContext.selected_order;
+  const fulfillments = Array.isArray(order?.fulfillments) ? order.fulfillments : [];
+
+  for (const fulfillment of fulfillments) {
+    const tracking = Array.isArray(fulfillment.tracking) ? fulfillment.tracking : [];
+    const company = tracking.find(info => info?.company)?.company;
+    if (company) return normalizeCarrierLabel(company);
+  }
+
+  const reason = supportCase?.reasons?.find(item => String(item).startsWith('local_handoff_carrier:'));
+  const carrier = String(reason || '').split(':').slice(1).join(':');
+  return normalizeCarrierLabel(carrier);
+}
+
+function normalizeCarrierLabel(carrier = '') {
+  if (/ctt/i.test(carrier)) return 'CTT Express';
+  if (/royal\s*mail/i.test(carrier)) return 'Royal Mail';
+  return carrier || 'local carrier';
+}
+
+function likelyCarrierStatus(carrier = '') {
+  if (/ctt/i.test(carrier)) {
+    return 'Pending receipt at CTT Express / Pendiente de recepcion en CTT Express / Pendiente de entrada en red';
+  }
+  if (/royal\s*mail/i.test(carrier)) return 'Royal Mail expecting parcel / tracking not recognised by Royal Mail yet';
+  return 'Pending receipt by the local carrier';
+}
+
+function customsCustomerExplanation(carrier = '') {
+  if (/ctt/i.test(carrier)) {
+    return [
+      'The label/details have been sent to CTT, but CTT has not physically received the parcel yet.',
+      'For Kits Republic shipments from China, this usually means the parcel is still before CTT handoff: in China, in flight, in consolidation, or in customs/pre-entry processing.',
+      'It is normal for this status to remain unchanged for several days on China-origin shipments.'
+    ].join(' ');
+  }
+  if (/royal\s*mail/i.test(carrier)) {
+    return 'Royal Mail does not recognise the tracking number yet because the shipment is waiting for customs clearance before local handoff.';
+  }
+  return 'The local carrier has the shipment details but has not physically received the parcel yet because customs clearance has not finished.';
+}
+
+export function buildFallbackDraft({ shopifyContext, latestMessage }) {
+  const warnings = [...(shopifyContext.warnings || [])];
+
+  if (!shopifyContext.selected_order) {
+    const hasMultipleCandidates = Array.isArray(shopifyContext.orders) && shopifyContext.orders.length > 1;
+    return {
+      draft: [
+        'Hi,',
+        '',
+        hasMultipleCandidates
+          ? 'Thanks for reaching out. Could you please confirm your order number so we can check the correct order for you?'
+          : 'Thanks for reaching out. Could you please send us your order number or the email used at checkout so we can check this properly for you?',
+        '',
+        'Once we have that, we can look into the order and give you a clear update.'
+      ].join('\n'),
+      reasoning_summary: 'No single Shopify order could be selected from the available conversation context.',
+      confidence: 'low',
+      warnings
+    };
+  }
+
+  const order = shopifyContext.selected_order;
+  const fulfillment = order.fulfillments?.[0];
+  const tracking = fulfillment?.tracking?.[0];
+  const details = [
+    `Order: ${order.name}`,
+    `Fulfillment status: ${order.fulfillment_status || 'unknown'}`
+  ];
+  if (fulfillment?.display_status) details.push(`Shipment status: ${fulfillment.display_status}`);
+  if (tracking?.number) details.push(`Tracking: ${tracking.number}`);
+
+  return {
+    draft: [
+      'Hi,',
+      '',
+      `Thanks for reaching out. I checked your order ${order.name}.`,
+      '',
+      `Current status: ${details.join(' | ')}.`,
+      '',
+      'We will keep an eye on this and update you if anything else is needed.'
+    ].join('\n'),
+    reasoning_summary: `${shopifyContext.selection_reason || 'A Shopify order was selected.'} ${latestMessage ? 'The draft uses current order status only.' : ''}`.trim(),
+    confidence: 'medium',
+    warnings
+  };
+}
+
+function buildShopifyPromptSummary(shopifyContext = {}) {
+  return {
+    selected_order: shopifyContext.selected_order,
+    selection_reason: shopifyContext.selection_reason,
+    order_candidates: summarizePromptOrderCandidates(shopifyContext.orders || [], shopifyContext.selected_order?.name),
+    warnings: shopifyContext.warnings
+  };
+}
+
+function summarizePromptOrderCandidates(orders = [], selectedOrderRef = '') {
+  return orders.map(order => ({
+    order: order.name,
+    date: order.created_at || null,
+    selected: Boolean(selectedOrderRef && order.name === selectedOrderRef)
+  }));
+}
+
+function inferAgentChatLanguage(chatMessages = []) {
+  const latestAgentMessage = [...chatMessages].reverse().find(message => message.role === 'user')?.content || '';
+  return detectLanguageFromText(latestAgentMessage) || 'English';
+}
+
+export function conversationToText(messages = []) {
+  return messages
+    .slice(-20)
+    .map(message => {
+      const type = normalizeMessageType(message.message_type);
+      const sender = message.sender?.name || message.sender?.email || type;
+      const content = messageTextWithSubject(message);
+      return `${type.toUpperCase()} ${sender}: ${content}`;
+    })
+    .filter(line => line.trim())
+    .join('\n');
+}
+
+export function latestIncomingMessage(messages = []) {
+  const incoming = [...messages].reverse().find(message => {
+    return normalizeMessageType(message.message_type) === 'incoming' && (message.content || messageSubject(message));
+  });
+  return messageTextWithSubject(incoming);
+}
+
+export function messageTextWithSubject(message = {}) {
+  if (!message) return '';
+  return prependSubjectToText(stripHtml(message.content || ''), messageSubject(message));
+}
+
+export function prependSubjectToText(text = '', subject = '') {
+  const cleanText = stripHtml(text);
+  const cleanSubject = stripHtml(subject);
+  if (!cleanSubject) return cleanText;
+  if (cleanText.includes(cleanSubject)) return cleanText;
+  return [`Subject: ${cleanSubject}`, cleanText].filter(Boolean).join('\n\n');
+}
+
+export function messageSubject(message = {}) {
+  const contentAttributes = message.content_attributes || message.contentAttributes || {};
+  const additionalAttributes = message.additional_attributes || message.additionalAttributes || {};
+  const conversationAttributes = message.conversation?.additional_attributes
+    || message.conversation?.additionalAttributes
+    || {};
+
+  return stripHtml(
+    message.subject
+    || contentAttributes.email?.subject
+    || contentAttributes.email?.mail_subject
+    || contentAttributes.subject
+    || contentAttributes.email_subject
+    || contentAttributes.mail_subject
+    || additionalAttributes.mail_subject
+    || additionalAttributes.subject
+    || conversationAttributes.mail_subject
+    || conversationAttributes.subject
+    || ''
+  );
+}
+
+function normalizeMessageType(type) {
+  if (type === 0 || type === 'incoming') return 'incoming';
+  if (type === 1 || type === 'outgoing') return 'outgoing';
+  return String(type || 'message');
+}
+
+function stripHtml(value) {
+  return String(value).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeChatMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .map(message => ({
+      role: message?.role === 'assistant' ? 'assistant' : 'user',
+      content: String(message?.content || '').trim()
+    }))
+    .filter(message => message.content)
+    .slice(-24);
+}
