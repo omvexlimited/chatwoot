@@ -10,6 +10,76 @@ const POLICY_LINKS = {
   faqHelp: 'https://kitsrepublic.com/pages/faq-help-center'
 };
 
+const POLICY_LABELS = {
+  shipping: {
+    English: 'Shipping policy:',
+    Spanish: 'Política de envíos:',
+    Catalan: 'Política d enviaments:',
+    French: 'Politique de livraison:',
+    German: 'Versandrichtlinie:',
+    Italian: 'Politica di spedizione:',
+    Portuguese: 'Politica de envio:',
+    Dutch: 'Verzendbeleid:'
+  },
+  refund: {
+    English: 'Refund policy:',
+    Spanish: 'Política de devoluciones:',
+    Catalan: 'Política de devolucions:',
+    French: 'Politique de retour:',
+    German: 'Rückerstattungsrichtlinie:',
+    Italian: 'Politica di reso:',
+    Portuguese: 'Politica de reembolso:',
+    Dutch: 'Retourbeleid:'
+  },
+  sizeGuide: {
+    English: 'Size guide:',
+    Spanish: 'Guía de tallas:',
+    Catalan: 'Guia de talles:',
+    French: 'Guide des tailles:',
+    German: 'Größentabelle:',
+    Italian: 'Guida alle taglie:',
+    Portuguese: 'Guia de tamanhos:',
+    Dutch: 'Maattabel:'
+  },
+  terms: {
+    English: 'Terms of service:',
+    Spanish: 'Términos del servicio:',
+    Catalan: 'Termes del servei:',
+    French: 'Conditions de service:',
+    German: 'Nutzungsbedingungen:',
+    Italian: 'Termini di servizio:',
+    Portuguese: 'Termos de serviço:',
+    Dutch: 'Servicevoorwaarden:'
+  },
+  privacy: {
+    English: 'Privacy policy:',
+    Spanish: 'Política de privacidad:',
+    Catalan: 'Política de privacitat:',
+    French: 'Politique de confidentialité:',
+    German: 'Datenschutzrichtlinie:',
+    Italian: 'Informativa sulla privacy:',
+    Portuguese: 'Política de privacidade:',
+    Dutch: 'Privacybeleid:'
+  },
+  faqHelp: {
+    English: 'FAQ / Help Center:',
+    Spanish: 'FAQ / Centro de ayuda:',
+    Catalan: 'FAQ / Centre d ajuda:',
+    French: 'FAQ / Centre d aide:',
+    German: 'FAQ / Hilfezentrum:',
+    Italian: 'FAQ / Centro assistenza:',
+    Portuguese: 'FAQ / Centro de ajuda:',
+    Dutch: 'FAQ / Helpcentrum:'
+  }
+};
+
+const STANDALONE_POLICY_LABELS = new Set(
+  Object.values(POLICY_LABELS)
+    .flatMap(labels => Object.values(labels))
+    .flatMap(label => [label, label.replace(/:$/, '')])
+    .map(normalizePolicyLabel)
+);
+
 export function enforceDraftRequirements({
   draft = '',
   supportCase,
@@ -69,6 +139,7 @@ function normalizeDraftFormatting(text) {
   value = normalizeDashPunctuation(value);
   value = normalizeLabelUrlSpacing(value);
   value = normalizeSignatureSpacing(value);
+  value = normalizeKnownLabelUrlBlockSpacing(value);
   return normalizeBlankLines(value);
 }
 
@@ -80,14 +151,39 @@ function normalizeDashPunctuation(text) {
 }
 
 function normalizeLabelUrlSpacing(text) {
-  return text.replace(/([^\n:]{2,80}:)\s*(https?:\/\/\S+)/g, '$1\n\n$2');
+  return text.replace(/([^\n:]{2,80}:)\s*(https?:\/\/\S+)/g, '$1\n$2');
 }
 
 function normalizeSignatureSpacing(text) {
-  return text.replace(
-    /(Best,|Best regards,|Kind regards,|Regards,|Un saludo,|Saludos,|Salutacions,|Cordialment,|Atentament,|Cordialement,|Viele Gruesse,|Viele Grüße,|Grazie,|Obrigado,|Obrigada,|Met vriendelijke groet,)\s*www\.kitsrepublic\.com/gi,
+  const spaced = text.replace(
+    /(Best,|Best regards,|Kind regards,|Regards,|Un saludo,|Saludos,|Salutacions,|Cordialment,|Atentament,|Cordialement,|Viele Gruesse,|Viele Grüße,|Mit freundlichen Grüßen,?|Grazie,|Obrigado,|Obrigada,|Met vriendelijke groet,?|Vriendelijke groet,?)\s*www\.kitsrepublic\.com/gi,
     (_, signoff) => `${signoff}\n\nwww.kitsrepublic.com`
   );
+  return spaced.replace(
+    /(Mit freundlichen Grüßen,?|Met vriendelijke groet,?|Vriendelijke groet,?)\n{2,}www\.kitsrepublic\.com/gi,
+    (_, signoff) => `${signoff}\nwww.kitsrepublic.com`
+  );
+}
+
+function normalizeKnownLabelUrlBlockSpacing(text) {
+  const lines = text.split('\n');
+  const result = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (isStandaloneTrackingLabel(line) || isStandalonePolicyLabel(line)) {
+      const nextIndex = nextNonBlankLineIndex(lines, index + 1);
+      if (nextIndex !== -1 && isKnownPublicUrl(lines[nextIndex])) {
+        result.push(ensureTrailingColon(line.trim()));
+        result.push(lines[nextIndex].trim());
+        index = nextIndex;
+        continue;
+      }
+    }
+    result.push(line);
+  }
+
+  return normalizeBlankLines(result.join('\n'));
 }
 
 function ensureWarmOpening(text, language) {
@@ -105,7 +201,7 @@ function thankYouSentence(language) {
     Spanish: 'Muchas gracias por tu correo.',
     Catalan: 'Moltes gràcies pel teu missatge.',
     French: 'Merci beaucoup pour votre message.',
-    German: 'Vielen Dank fuer deine Nachricht.',
+    German: 'Vielen Dank für Ihre Nachricht.',
     Italian: 'Grazie mille per il tuo messaggio.',
     Portuguese: 'Muito obrigado pela tua mensagem.',
     Dutch: 'Bedankt voor je bericht.'
@@ -175,7 +271,7 @@ function moveTrackingBlockBeforeSignature(text, trackingUrl, language) {
   }
 
   const block = startIndex === linkIndex
-    ? [trackingLabel(language), '', trackingUrl].join('\n')
+    ? [trackingLabel(language), trackingUrl].join('\n')
     : normalizeBlankLines(lines.slice(startIndex, linkIndex + 1).join('\n'));
 
   const remaining = lines.filter((_, index) => index < startIndex || index > linkIndex).join('\n');
@@ -451,7 +547,6 @@ function trackingLinkBlock({ draft, trackingUrl, language }) {
   if (hasPublicTrackingUrl(draft, trackingUrl)) return '';
   return [
     trackingLabel(language),
-    '',
     trackingUrl
   ].join('\n');
 }
@@ -475,7 +570,7 @@ function customsTrackingBlock({ draft, trackingUrl, language }) {
   if (!draft.includes(trackingUrl)) {
     if (lines.length) lines.push('');
     lines.push(trackingLabel(language));
-    lines.push('', trackingUrl);
+    lines.push(trackingUrl);
   }
 
   return lines.length ? lines.join('\n') : '';
@@ -487,7 +582,7 @@ function trackingLabel(language) {
     Spanish: 'Puedes seguir el envío aquí:',
     Catalan: 'Pots seguir l enviament aquí:',
     French: 'Vous pouvez suivre l envoi ici:',
-    German: 'Du kannst die Sendung hier verfolgen:',
+    German: 'Sie können die Sendung hier verfolgen:',
     Italian: 'Puoi seguire la spedizione qui:',
     Portuguese: 'Pode acompanhar o envio aqui:',
     Dutch: 'Je kunt de zending hier volgen:'
@@ -495,7 +590,7 @@ function trackingLabel(language) {
 }
 
 function applyRequiredPolicyLinks(text, language) {
-  return [
+  const withPolicyLinks = [
     ['shipping', needsShippingPolicy],
     ['refund', needsRefundPolicy],
     ['sizeGuide', needsSizeGuide],
@@ -507,6 +602,8 @@ function applyRequiredPolicyLinks(text, language) {
     if (!predicate(withoutDuplicates)) return withoutDuplicates;
     return insertPolicyAfterMatchingParagraph(withoutDuplicates, language, type, predicate);
   }, text);
+
+  return removeOrphanPolicyLabels(withPolicyLinks);
 }
 
 function needsShippingPolicy(text) {
@@ -547,6 +644,44 @@ function isPolicyLabelLine(line = '') {
   return /\b(policy|pol[ií]tica|politique|richtlinie|beleid|gu[ií]a|guide|maattabel|tabella|terms|t[eé]rminos|privacy|privacidad|faq|help center|centro de ayuda)\b/i.test(line);
 }
 
+function removeOrphanPolicyLabels(text) {
+  const lines = text.split('\n');
+  const remove = new Set();
+
+  lines.forEach((line, index) => {
+    if (!isStandalonePolicyLabel(line)) return;
+
+    const nextContentIndex = nextNonBlankLineIndex(lines, index + 1);
+    const hasPolicyLink = nextContentIndex !== -1 && isPolicyUrl(lines[nextContentIndex]);
+    if (!hasPolicyLink) markLabelOnlyForRemoval(lines, index, remove);
+  });
+
+  return normalizeBlankLines(lines.filter((_, index) => !remove.has(index)).join('\n'));
+}
+
+function isStandalonePolicyLabel(line = '') {
+  const value = line.trim();
+  if (!value || value.length > 90 || /^https?:\/\//i.test(value)) return false;
+  return STANDALONE_POLICY_LABELS.has(normalizePolicyLabel(value));
+}
+
+function normalizePolicyLabel(value = '') {
+  return String(value || '').trim().replace(/:$/, '').trim().toLowerCase();
+}
+
+function isPolicyUrl(line = '') {
+  return Object.values(POLICY_LINKS).includes(line.trim());
+}
+
+function isKnownPublicUrl(line = '') {
+  const value = line.trim();
+  return isPolicyUrl(value) || /https:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=/i.test(value);
+}
+
+function ensureTrailingColon(value = '') {
+  return value.trim().endsWith(':') ? value.trim() : `${value.trim()}:`;
+}
+
 function insertPolicyAfterMatchingParagraph(text, language, type, predicate) {
   const paragraphs = splitParagraphs(text);
   const block = policyLinkBlock(language, type);
@@ -563,72 +698,8 @@ function splitParagraphs(text) {
 }
 
 function policyLinkBlock(language, type) {
-  const labels = {
-    shipping: {
-      English: 'Shipping policy:',
-      Spanish: 'Política de envíos:',
-      Catalan: 'Política d enviaments:',
-      French: 'Politique de livraison:',
-      German: 'Versandrichtlinie:',
-      Italian: 'Politica di spedizione:',
-      Portuguese: 'Politica de envio:',
-      Dutch: 'Verzendbeleid:'
-    },
-    refund: {
-      English: 'Refund policy:',
-      Spanish: 'Política de devoluciones:',
-      Catalan: 'Política de devolucions:',
-      French: 'Politique de retour:',
-      German: 'Rueckerstattungsrichtlinie:',
-      Italian: 'Politica di reso:',
-      Portuguese: 'Politica de reembolso:',
-      Dutch: 'Retourbeleid:'
-    },
-    sizeGuide: {
-      English: 'Size guide:',
-      Spanish: 'Guía de tallas:',
-      Catalan: 'Guia de talles:',
-      French: 'Guide des tailles:',
-      German: 'Groessentabelle:',
-      Italian: 'Guida alle taglie:',
-      Portuguese: 'Guia de tamanhos:',
-      Dutch: 'Maattabel:'
-    },
-    terms: {
-      English: 'Terms of service:',
-      Spanish: 'Términos del servicio:',
-      Catalan: 'Termes del servei:',
-      French: 'Conditions de service:',
-      German: 'Nutzungsbedingungen:',
-      Italian: 'Termini di servizio:',
-      Portuguese: 'Termos de serviço:',
-      Dutch: 'Servicevoorwaarden:'
-    },
-    privacy: {
-      English: 'Privacy policy:',
-      Spanish: 'Política de privacidad:',
-      Catalan: 'Política de privacitat:',
-      French: 'Politique de confidentialité:',
-      German: 'Datenschutzrichtlinie:',
-      Italian: 'Informativa sulla privacy:',
-      Portuguese: 'Política de privacidade:',
-      Dutch: 'Privacybeleid:'
-    },
-    faqHelp: {
-      English: 'FAQ / Help Center:',
-      Spanish: 'FAQ / Centro de ayuda:',
-      Catalan: 'FAQ / Centre d ajuda:',
-      French: 'FAQ / Centre d aide:',
-      German: 'FAQ / Hilfezentrum:',
-      Italian: 'FAQ / Centro assistenza:',
-      Portuguese: 'FAQ / Centro de ajuda:',
-      Dutch: 'FAQ / Helpcentrum:'
-    }
-  };
-
   return [
-    copyForLanguage(language, labels[type]),
-    '',
+    copyForLanguage(language, POLICY_LABELS[type]),
     POLICY_LINKS[type]
   ].join('\n');
 }
@@ -671,7 +742,7 @@ function isGreetingLine(line = '') {
 }
 
 function isSignOffLine(line = '') {
-  return /^(best|best regards|kind regards|regards|un saludo|saludos|salutacions|cordialment|atentament|cordialement|viele gruesse|viele grüße|grazie|obrigado|obrigada|met vriendelijke groet),?$/i.test(line.trim());
+  return /^(best|best regards|kind regards|regards|un saludo|saludos|salutacions|cordialment|atentament|cordialement|viele gruesse|viele grüße|mit freundlichen grüßen|grazie|obrigado|obrigada|met vriendelijke groet|vriendelijke groet),?$/i.test(line.trim());
 }
 
 function normalizeBlankLines(text) {

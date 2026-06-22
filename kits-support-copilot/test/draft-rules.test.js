@@ -150,7 +150,7 @@ test('adds official timeframes and shipping policy for order update questions', 
 
   assert.match(result, /processing time is 1-3 days/i);
   assert.match(result, /delivery normally takes 7-15 days from purchase/i);
-  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
   assert.ok(result.indexOf('Shipping policy:') < result.indexOf('Best regards,'));
 });
 
@@ -197,7 +197,7 @@ test('removes processing time from fulfilled tracking update questions', () => {
 
   assert.doesNotMatch(result, /processing time/i);
   assert.match(result, /Delivery normally takes 7-15 days from purchase\./);
-  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
   assert.ok(result.indexOf('This is why the tracking may not show many updates yet.') < result.indexOf('Delivery normally takes 7-15 days from purchase.'));
   assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('Best regards,'));
 });
@@ -234,7 +234,7 @@ test('adds delivery-only timeframe for fulfilled order update questions', () => 
 
   assert.doesNotMatch(result, /processing time/i);
   assert.match(result, /Delivery normally takes 7-15 days from purchase\./);
-  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
 });
 
 test('adds refund policy link when returns or exchanges are mentioned', () => {
@@ -269,9 +269,9 @@ test('adds terms privacy and FAQ links when those topics are mentioned', () => {
 
   const result = enforceDraftRequirements({ draft, responseLanguage: { language: 'English' } });
 
-  assert.match(result, /Terms of service:\n\nhttps:\/\/kitsrepublic\.com\/policies\/terms-of-service/);
-  assert.match(result, /Privacy policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/privacy-policy/);
-  assert.match(result, /FAQ \/ Help Center:\n\nhttps:\/\/kitsrepublic\.com\/pages\/faq-help-center/);
+  assert.match(result, /Terms of service:\nhttps:\/\/kitsrepublic\.com\/policies\/terms-of-service/);
+  assert.match(result, /Privacy policy:\nhttps:\/\/kitsrepublic\.com\/policies\/privacy-policy/);
+  assert.match(result, /FAQ \/ Help Center:\nhttps:\/\/kitsrepublic\.com\/pages\/faq-help-center/);
 });
 
 test('deduplicates manually included terms privacy and FAQ links', () => {
@@ -406,7 +406,7 @@ test('cleans duplicate tracking links, misplaced shipping policy, and cramped si
 
   assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
   assert.doesNotMatch(result, /www\.17track\.net/);
-  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
   assert.equal((result.match(/kitsrepublic\.com\/policies\/shipping-policy/g) || []).length, 1);
   assert.ok(
     result.indexOf('usual delivery timeframe of 7–15 days from purchase.') <
@@ -624,7 +624,7 @@ test('removes orphan tracking label after a valid tracking block', () => {
   assert.equal((result.match(/You can follow the shipment here:/g) || []).length, 1);
   assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
   assert.match(result, /Delivery normally takes around 7-15 days from purchase/);
-  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
   assert.match(result, /Best,\n\nwww\.kitsrepublic\.com$/);
 });
 
@@ -668,8 +668,100 @@ test('removes French duplicate timeframe and orphan tracking label', () => {
   assert.doesNotMatch(result, /Vous pouvez suivre votre colis ici/);
   assert.equal((result.match(/Vous pouvez suivre l envoi ici:/g) || []).length, 1);
   assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
-  assert.match(result, /Politique de livraison:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Politique de livraison:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
   assert.match(result, /Cordialement,\n\nwww\.kitsrepublic\.com$/);
+});
+
+test('removes German orphan shipping policy label and keeps tracking before sign-off', () => {
+  const draft = [
+    'Hallo Luis,',
+    '',
+    'vielen Dank für Ihre Nachricht.',
+    '',
+    'Ihre Bestellung #1300 wurde versendet und befindet sich aktuell auf dem Weg. Die Lieferung dauert normalerweise 7-15 Tage ab Kaufdatum. Da es in Ihrem Fall bereits etwas länger dauert als üblich, entschuldigen wir uns für die Wartezeit. Das Tracking sollte automatisch aktualisiert werden, sobald das Paket an den lokalen Zustelldienst übergeben wurde.',
+    '',
+    'Versandrichtlinie:',
+    '',
+    'https://kitsrepublic.com/policies/shipping-policy',
+    '',
+    'Versandrichtlinie',
+    '',
+    'Mit freundlichen Grüßen',
+    '',
+    'Sie können die Sendung hier verfolgen:',
+    '',
+    'https://kitsrepublic.com/apps/17TRACK?nums=2764907499000900085000',
+    '',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'German' },
+    shopifyContext: {
+      selected_order: {
+        fulfillments: [
+          {
+            tracking_numbers: ['2764907499000900085000'],
+            tracking: [{ number: '2764907499000900085000' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal((result.match(/Versandrichtlinie/g) || []).length, 1);
+  assert.match(result, /Versandrichtlinie:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.equal((result.match(/Sie können die Sendung hier verfolgen:/g) || []).length, 1);
+  assert.match(result, /Sie können die Sendung hier verfolgen:\nhttps:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=2764907499000900085000/);
+  assert.ok(result.indexOf('Sie können die Sendung hier verfolgen:') < result.indexOf('Mit freundlichen Grüßen'));
+  assert.match(result, /Mit freundlichen Grüßen\nwww\.kitsrepublic\.com$/);
+});
+
+test('removes Dutch orphan shipping policy label and keeps tracking before sign-off', () => {
+  const draft = [
+    'Hallo Luis,',
+    '',
+    'Bedankt voor je bericht.',
+    '',
+    'Je bestelling #1300 is verzonden. Levering duurt normaal 7-15 dagen vanaf aankoop.',
+    '',
+    'Verzendbeleid:',
+    '',
+    'https://kitsrepublic.com/policies/shipping-policy',
+    '',
+    'Verzendbeleid',
+    '',
+    'Met vriendelijke groet',
+    '',
+    'Je kunt de zending hier volgen:',
+    '',
+    'https://kitsrepublic.com/apps/17TRACK?nums=2764907499000900085000',
+    '',
+    'www.kitsrepublic.com'
+  ].join('\n');
+
+  const result = enforceDraftRequirements({
+    draft,
+    responseLanguage: { language: 'Dutch' },
+    shopifyContext: {
+      selected_order: {
+        fulfillments: [
+          {
+            tracking_numbers: ['2764907499000900085000'],
+            tracking: [{ number: '2764907499000900085000' }]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal((result.match(/Verzendbeleid/g) || []).length, 1);
+  assert.match(result, /Verzendbeleid:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.equal((result.match(/Je kunt de zending hier volgen:/g) || []).length, 1);
+  assert.match(result, /Je kunt de zending hier volgen:\nhttps:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=2764907499000900085000/);
+  assert.ok(result.indexOf('Je kunt de zending hier volgen:') < result.indexOf('Met vriendelijke groet'));
+  assert.match(result, /Met vriendelijke groet\nwww\.kitsrepublic\.com$/);
 });
 
 test('keeps the tracking label immediately associated with the canonical link', () => {
@@ -702,7 +794,7 @@ test('keeps the tracking label immediately associated with the canonical link', 
   });
 
   assert.doesNotMatch(result, /You can follow the shipment here:/);
-  assert.match(result, /Track your parcel here:\n\nhttps:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=GV501871585GB/);
+  assert.match(result, /Track your parcel here:\nhttps:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=GV501871585GB/);
   assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
 });
 
@@ -725,7 +817,7 @@ test('removes false recent-shipment estimate wording when delivery analytics are
   assert.doesNotMatch(result, /Based on recent shipments/i);
   assert.doesNotMatch(result, /Royal Mail, this stage usually takes around 7-15 days after dispatch/i);
   assert.match(result, /Our usual delivery timeframe is 7-15 days from purchase, but it can vary\./);
-  assert.match(result, /Shipping policy:\n\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
 });
 
 test('replaces exact recent-shipment decimal wording when delivery analytics are reliable', () => {
