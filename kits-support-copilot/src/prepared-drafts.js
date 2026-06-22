@@ -78,7 +78,7 @@ export function parsePreparedDraftWebhook(payload = {}) {
   if (!content) return ignored('empty_content');
 
   const accountId = clean(payload.account?.id);
-  const conversationId = clean(payload.conversation?.id || payload.conversation_id);
+  const conversationId = clean(payload.conversation_id || payload.conversation?.display_id || payload.conversation?.id);
   const messageId = clean(payload.id);
   if (!accountId || !conversationId || !messageId) return ignored('missing_required_ids');
 
@@ -198,6 +198,34 @@ export async function processPendingPreparedDrafts({ config, generate, limit = 2
   } finally {
     workerRunning = false;
   }
+}
+
+export async function getLatestInsertedPreparedDraft({ config, accountId, conversationId, excludeId = null }) {
+  if (!accountId || !conversationId || !usesDatabase(config)) return null;
+
+  await ensurePreparedDraftsTable({ config });
+  return withPreparedDraftClient(config, async client => {
+    const params = [String(accountId), String(conversationId)];
+    let query = `
+      SELECT *
+      FROM copilot_prepared_drafts
+      WHERE account_id = $1
+        AND conversation_id = $2
+        AND inserted_at IS NOT NULL
+        AND COALESCE(draft, '') <> ''
+    `;
+
+    if (excludeId) {
+      params.push(Number(excludeId));
+      query += ` AND id <> $3`;
+    }
+
+    query += ` ORDER BY inserted_at DESC LIMIT 1`;
+
+    const result = await client.query(query, params);
+    const row = result.rows[0];
+    return row ? formatPreparedDraftRow(row) : null;
+  });
 }
 
 export async function getPreparedDraft({ config, accountId, conversationId, latestMessageId = '' }) {
@@ -353,7 +381,8 @@ async function processPreparedDraftRow({ config, generate, row }) {
         context_summary: result.context_summary || null,
         warnings: normalizeArray(result.warnings),
         confidence: result.confidence || 'low',
-        failure_reason: null
+        failure_reason: null,
+        inserted_at: result.inserted_at || null
       });
       return;
     }
@@ -369,6 +398,7 @@ async function processPreparedDraftRow({ config, generate, row }) {
             context_summary = $5::jsonb,
             warnings = $6::jsonb,
             confidence = $7,
+            inserted_at = COALESCE($8::timestamptz, inserted_at),
             failure_reason = NULL,
             updated_at = NOW()
         WHERE id = $1
@@ -380,7 +410,8 @@ async function processPreparedDraftRow({ config, generate, row }) {
           JSON.stringify(result.agent_briefing || null),
           JSON.stringify(result.context_summary || null),
           JSON.stringify(normalizeArray(result.warnings)),
-          result.confidence || 'low'
+          result.confidence || 'low',
+          result.inserted_at || null
         ]
       );
     });

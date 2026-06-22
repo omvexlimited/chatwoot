@@ -9,6 +9,7 @@ import { segmentCommandLinks } from './command-links.js';
 import {
   filterCommandOptions,
   getActiveSlashToken,
+  parseOrderLinkCommand,
   replaceActiveSlashToken
 } from './commands.js';
 
@@ -38,6 +39,7 @@ const state = {
   contextRequestId: 0,
   chatRequestId: 0,
   preparedDraftRequestId: 0,
+  preparedDraftLookupPending: false,
   appliedPreparedDraftKey: '',
   lazyDraftStartedFor: ''
 };
@@ -153,6 +155,7 @@ function hydrateFromContext() {
     state.contextResult = null;
     state.appliedPreparedDraftKey = '';
     state.lazyDraftStartedFor = '';
+    state.preparedDraftLookupPending = false;
     let session = loadSession(window.localStorage, state.storageKey);
     session = sessionBelongsToContact(session, contact) ? session : clearStoredSession();
     state.chatMessages = session.chatMessages;
@@ -171,6 +174,7 @@ function hydrateFromContext() {
 
   renderChat();
   updateButtons();
+  loadPreparedDraft();
   loadContext();
 }
 
@@ -221,12 +225,14 @@ async function loadContext() {
     state.contextResult = result;
     renderContext(result);
     setStatus('Context ready');
-    loadPreparedDraft();
+    if (!state.preparedDraftLookupPending) maybeGenerateLazyDraft();
+    return result;
   } catch (error) {
     if (!isCurrentContext({ contextKey, requestId, type: 'context' })) return;
     setStatus('Context error');
     els.contextSummary.textContent = error.message;
     els.contextBox.textContent = error.message;
+    return null;
   }
 }
 
@@ -239,12 +245,14 @@ async function loadPreparedDraft({ pollAttempt = 0 } = {}) {
   const contextKey = state.contextKey;
   const requestId = state.preparedDraftRequestId + 1;
   state.preparedDraftRequestId = requestId;
+  state.preparedDraftLookupPending = true;
 
   try {
     const result = await api('/api/prepared-draft', payload);
     if (!isCurrentContext({ contextKey, requestId, type: 'preparedDraft' })) return;
 
     if (result.status === 'generated' && result.draft) {
+      state.preparedDraftLookupPending = false;
       await applyPreparedDraft(result);
       return;
     }
@@ -257,9 +265,11 @@ async function loadPreparedDraft({ pollAttempt = 0 } = {}) {
       return;
     }
 
+    state.preparedDraftLookupPending = false;
     maybeGenerateLazyDraft();
   } catch {
     if (!isCurrentContext({ contextKey, requestId, type: 'preparedDraft' })) return;
+    state.preparedDraftLookupPending = false;
     maybeGenerateLazyDraft();
   }
 }
@@ -285,6 +295,12 @@ async function applyPreparedDraft(result = {}) {
       warnings: result.warnings || state.contextResult.warnings
     };
     renderContext(state.contextResult);
+  } else if (result.context_summary) {
+    state.contextResult = {
+      context_summary: result.context_summary,
+      warnings: result.warnings || []
+    };
+    renderContext(state.contextResult);
   }
 
   const message = result.assistant_message || 'Draft prepared.';
@@ -297,7 +313,23 @@ async function applyPreparedDraft(result = {}) {
   renderChat();
   persistSession();
   updateButtons();
+  if (result.inserted_at) {
+    setStatus('Draft ready');
+    await insertPreparedDraftIfComposerIsEmpty(result.draft);
+    return;
+  }
   await autoInsertReply(result.draft, { policy: 'auto' });
+}
+
+async function insertPreparedDraftIfComposerIsEmpty(draft) {
+  try {
+    const composer = await getReplyEditorContentFromChatwoot();
+    if (String(composer.content || '').trim()) return;
+    await autoInsertReply(draft, { policy: 'auto' });
+  } catch {
+    // If the native Chatwoot draft is already stored, failing to inspect the
+    // visible composer should not trigger duplicate fallback generation.
+  }
 }
 
 function maybeGenerateLazyDraft() {
@@ -382,6 +414,11 @@ async function sendAgentMessage(rawMessage) {
   renderChat();
   persistSession();
 
+  if (await handleOrderLinkCommand(content)) {
+    updateButtons();
+    return;
+  }
+
   const contextKey = state.contextKey;
   const requestId = state.chatRequestId + 1;
   state.chatRequestId = requestId;
@@ -440,6 +477,87 @@ async function sendAgentMessage(rawMessage) {
     setBusy(false);
     updateButtons();
   }
+}
+
+async function handleOrderLinkCommand(content) {
+  const command = parseOrderLinkCommand(content);
+  if (!command) return false;
+
+  if (command.name === 'unlinkorder') {
+    resetConversationDraftState({ selectedOrderRef: '' });
+    state.chatMessages = [{ role: 'user', content }];
+    renderChat();
+    persistSession();
+    setStatus('Order unlinked');
+    const result = await loadContext();
+    rememberContextResult(result);
+    state.chatMessages = [
+      { role: 'user', content },
+      { role: 'assistant', content: result ? 'Manual order link removed. Context reloaded with automatic matching.' : 'Manual order link removed, but context reload failed.' }
+    ];
+    renderChat();
+    persistSession();
+    return true;
+  }
+
+  if (!command.orderRef) {
+    state.chatMessages.push({ role: 'assistant', content: 'Usage: /linkorder <order>. Example: /linkorder #1234' });
+    renderChat();
+    persistSession();
+    return true;
+  }
+
+  resetConversationDraftState({ selectedOrderRef: command.orderRef });
+  state.chatMessages = [{ role: 'user', content }];
+  renderChat();
+  persistSession();
+  setStatus(`Linking ${command.orderRef}...`);
+
+  const result = await loadContext();
+  rememberContextResult(result);
+  const selectedOrderRef = normalizeOrderRef(result?.context_summary?.selected_order_ref);
+  const linked = selectedOrderRef === command.orderRef;
+  if (!linked) state.selectedOrderRef = '';
+  const assistantMessage = !result
+    ? `Could not reload context for ${command.orderRef}.`
+    : linked
+      ? `Linked order ${command.orderRef} for this conversation. Context reloaded.`
+      : `Order ${command.orderRef} was not found in Shopify.`;
+
+  state.chatMessages = [
+    { role: 'user', content },
+    { role: 'assistant', content: assistantMessage }
+  ];
+  renderChat();
+  persistSession();
+  setStatus(linked ? 'Order linked' : result ? 'Order not found' : 'Context error');
+  return true;
+}
+
+function rememberContextResult(result) {
+  if (!result) return;
+  state.lastResult = {
+    ...(state.lastResult || {}),
+    contact_email: result.contact_email,
+    context_summary: result.context_summary,
+    shopify_context: result.shopify_context,
+    response_language: result.response_language,
+    warnings: result.warnings
+  };
+}
+
+function resetConversationDraftState({ selectedOrderRef }) {
+  state.selectedOrderRef = selectedOrderRef;
+  state.chatMessages = [];
+  state.lastResult = null;
+  state.pendingIssue = null;
+  state.contextResult = null;
+  state.lazyDraftStartedFor = '';
+  state.appliedPreparedDraftKey = '';
+  state.chatRequestId += 1;
+  els.draft.value = '';
+  els.confidence.textContent = 'confidence: n/a';
+  hideInsertNotice();
 }
 
 async function draftForAgentMessage(content) {

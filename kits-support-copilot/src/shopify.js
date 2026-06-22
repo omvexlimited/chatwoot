@@ -89,7 +89,7 @@ export async function getShopifyContext({ config, contactEmail, contactPhone, co
     };
   }
 
-  const queries = buildShopifyQueries({ contactEmail, identifiers });
+  const queries = buildShopifyQueries({ contactEmail, identifiers, selectedOrderRef });
   if (queries.length === 0) {
     return {
       available: true,
@@ -171,8 +171,13 @@ export async function getShopifyContext({ config, contactEmail, contactPhone, co
   };
 }
 
-export function buildShopifyQueries({ contactEmail, identifiers }) {
+export function buildShopifyQueries({ contactEmail, identifiers, selectedOrderRef = '' }) {
   const queries = [];
+  const normalizedSelectedOrderRef = normalizeOrderRef(selectedOrderRef);
+
+  if (normalizedSelectedOrderRef) {
+    queries.push(...withOrderStatusQueries(`name:${normalizedSelectedOrderRef}`));
+  }
 
   for (const orderRef of identifiers.orderRefs) {
     queries.push(...withOrderStatusQueries(`name:${orderRef}`));

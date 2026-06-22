@@ -33,5 +33,6 @@ function escapeRegExp(value = '') {
 function commandToRegExp(command = '') {
   if (command === '/forget <id>') return '\\/forget(?:\\s+(?:\\d+|<id>))';
   if (command === '/remember <text>') return '\\/remember(?:\\s+<text>)?';
+  if (command === '/linkorder <order>') return '\\/linkorder(?:\\s+(?:#?\\d+|<order>))?';
   return escapeRegExp(command);
 }

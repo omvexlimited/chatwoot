@@ -21,6 +21,8 @@ test('parses copilot memory commands', () => {
     name: 'newticket',
     argument: 'supplier says no stock'
   });
+  assert.deepEqual(parseCopilotCommand('/linkorder #2280'), { name: 'linkorder', argument: '#2280' });
+  assert.deepEqual(parseCopilotCommand('/unlinkorder'), { name: 'unlinkorder', argument: '' });
   assert.deepEqual(parseCopilotCommand('/grammar'), { name: 'grammar', argument: '' });
   assert.deepEqual(parseCopilotCommand('/help'), { name: 'help', argument: '' });
   assert.equal(parseCopilotCommand('normal message'), null);

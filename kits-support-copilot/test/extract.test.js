@@ -92,6 +92,37 @@ test('builds explicit order lookups that include closed archived orders', () => 
   ]);
 });
 
+test('builds selected order lookups even without email identifiers', () => {
+  const queries = buildShopifyQueries({
+    contactEmail: '',
+    selectedOrderRef: '2280',
+    identifiers: { orderRefs: [], trackingNumbers: [], emails: [] }
+  });
+
+  assert.deepEqual(queries, [
+    'name:#2280',
+    'name:#2280 status:open',
+    'name:#2280 status:closed',
+    'name:#2280 status:cancelled'
+  ]);
+});
+
+test('puts selected order lookup before active contact email lookup', () => {
+  const queries = buildShopifyQueries({
+    contactEmail: 'other@example.com',
+    selectedOrderRef: '#2280',
+    identifiers: { orderRefs: [], trackingNumbers: [], emails: [] }
+  });
+
+  assert.deepEqual(queries.slice(0, 4), [
+    'name:#2280',
+    'name:#2280 status:open',
+    'name:#2280 status:closed',
+    'name:#2280 status:cancelled'
+  ]);
+  assert.equal(queries.includes('email:other@example.com'), true);
+});
+
 test('builds phone fallback lookup queries without using phone filter syntax', () => {
   const queries = buildShopifyQueries({
     contactEmail: '',

@@ -70,6 +70,23 @@ test('parses incoming public Chatwoot webhooks into prepared draft jobs', () => 
   });
 });
 
+test('prefers Chatwoot display conversation_id from message webhooks', () => {
+  const parsed = parsePreparedDraftWebhook({
+    event: 'message_created',
+    id: 987,
+    message_type: 0,
+    private: false,
+    content: 'Where is my order?',
+    account: { id: 1 },
+    conversation_id: 620,
+    conversation: { id: 12345, display_id: 620, meta: { sender: { email: 'customer@example.com' } } },
+    sender: { email: 'customer@example.com' }
+  });
+
+  assert.equal(parsed.ignored, false);
+  assert.equal(parsed.job.conversation_id, '620');
+});
+
 test('ignores outgoing, private and empty webhooks', () => {
   assert.equal(parsePreparedDraftWebhook({ event: 'message_created', message_type: 'outgoing' }).reason, 'not_incoming');
   assert.equal(parsePreparedDraftWebhook({ event: 'message_created', message_type: 'incoming', private: true }).reason, 'private_message');
@@ -120,6 +137,41 @@ test('stores prepared draft jobs in memory when database is not configured', asy
   });
   assert.equal(stored.status, 'pending');
   assert.equal(stored.chatwoot_message_id, 'memory-message-1');
+});
+
+test('stores generated memory prepared drafts with inserted timestamp', async () => {
+  const payload = {
+    event: 'message_created',
+    id: 'memory-message-inserted',
+    message_type: 'incoming',
+    private: false,
+    content: 'Where is my order?',
+    account: { id: 'memory-account' },
+    conversation: { id: 'memory-conversation' },
+    sender: { email: 'customer@example.com' }
+  };
+
+  await enqueuePreparedDraftFromWebhook({ config: {}, payload });
+  const { processPendingPreparedDrafts } = await import('../src/prepared-drafts.js');
+  await processPendingPreparedDrafts({
+    config: {},
+    generate: async () => ({
+      draft: 'Prepared draft',
+      assistant_message: 'Prepared.',
+      inserted_at: '2026-06-19T10:00:00.000Z'
+    }),
+    limit: 1
+  });
+
+  const stored = await getPreparedDraft({
+    config: {},
+    accountId: 'memory-account',
+    conversationId: 'memory-conversation',
+    latestMessageId: 'memory-message-inserted'
+  });
+
+  assert.equal(stored.status, 'generated');
+  assert.equal(stored.inserted_at, '2026-06-19T10:00:00.000Z');
 });
 
 test('builds actionable agent briefing for size change requests', () => {

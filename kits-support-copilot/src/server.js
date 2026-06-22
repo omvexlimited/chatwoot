@@ -4,7 +4,13 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { loadConfig, getConfigStatus } from './config.js';
-import { fetchConversationMessages, createPrivateNote, prepareDraftReply } from './chatwoot.js';
+import {
+  fetchConversationMessages,
+  createPrivateNote,
+  getDraftReply,
+  listConversations,
+  prepareDraftReply
+} from './chatwoot.js';
 import { getShopifyContext } from './shopify.js';
 import { getAssignedProviders } from './provider-lookup.js';
 import { getProviderTrackingContext } from './provider-tracking.js';
@@ -34,6 +40,7 @@ import {
   enqueuePreparedDraftFromWebhook,
   ensurePreparedDraftsTable,
   formatAgentBriefingForChat,
+  getLatestInsertedPreparedDraft,
   getPreparedDraft,
   normalizeAgentBriefing,
   processPendingPreparedDrafts,
@@ -63,7 +70,13 @@ await ensurePreparedDraftsTable({ config }).catch(error => {
 });
 startPreparedDraftWorker({ config, generate: generatePreparedDraftForJob });
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch(error => {
+    handleRequestError({ req, res, error });
+  });
+});
+
+async function handleRequest(req, res) {
   try {
     addSecurityHeaders(req, res);
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -101,6 +114,11 @@ const server = http.createServer(async (req, res) => {
       return handlePreparedDraft(req, res);
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/prepared-drafts/backfill') {
+      if (!authorizeApiRequest(req, url, res)) return;
+      return handlePreparedDraftBackfill(req, res);
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/private-note') {
       if (!authorizeApiRequest(req, url, res)) return;
       return handlePrivateNote(req, res);
@@ -117,9 +135,19 @@ const server = http.createServer(async (req, res) => {
 
     return sendJson(res, 404, { error: 'Not found' });
   } catch (error) {
+    if (isRequestAbortError(error)) return;
     return sendJson(res, 500, { error: error.message });
   }
-});
+}
+
+function handleRequestError({ req, res, error }) {
+  if (isRequestAbortError(error) || req.destroyed || res.destroyed) return;
+  if (res.headersSent) {
+    res.destroy(error);
+    return;
+  }
+  sendJson(res, 500, { error: error.message });
+}
 
 server.listen(config.port, () => {
   console.log(`KR Copilot listening on ${config.port}`);
@@ -393,6 +421,69 @@ async function handlePreparedDraft(req, res) {
   return sendJson(res, 200, result);
 }
 
+async function handlePreparedDraftBackfill(req, res) {
+  const body = await readJsonBody(req);
+  const accountId = body.account_id || config.chatwootAccountId;
+  const statuses = normalizeBackfillStatuses(body.statuses || body.status || ['open', 'pending', 'snoozed']);
+  const maxPages = clampNumber(body.pages, 1, 10, 3);
+  const limit = clampNumber(body.limit, 1, 100, 50);
+  const results = {
+    scanned: 0,
+    eligible: 0,
+    enqueued: 0,
+    ignored: 0,
+    errors: []
+  };
+
+  if (!accountId) return sendJson(res, 422, { error: 'account_id is required' });
+
+  for (const status of statuses) {
+    for (let page = 1; page <= maxPages && results.enqueued < limit; page += 1) {
+      const data = await listConversations({ config, accountId, status, page });
+      const conversations = extractConversationList(data);
+      if (!conversations.length) break;
+
+      for (const conversation of conversations) {
+        if (results.enqueued >= limit) break;
+        results.scanned += 1;
+        const displayId = conversation.display_id || conversation.id;
+        if (!displayId) continue;
+
+        try {
+          const messageResult = await fetchConversationMessages({ config, accountId, conversationId: displayId });
+          const latestPublic = latestPublicChatMessage(messageResult.messages);
+          if (!latestPublic || !isIncomingMessageType(latestPublic.message_type)) continue;
+
+          results.eligible += 1;
+          const enqueueResult = await enqueuePreparedDraftFromWebhook({
+            config,
+            payload: preparedDraftWebhookFromConversation({
+              accountId,
+              conversation,
+              latestMessage: latestPublic
+            })
+          });
+
+          if (enqueueResult.enqueued) results.enqueued += 1;
+          else results.ignored += 1;
+        } catch (error) {
+          results.errors.push(`Conversation ${displayId}: ${error.message}`);
+        }
+      }
+    }
+  }
+
+  if (results.enqueued) {
+    setTimeout(() => {
+      processPendingPreparedDrafts({ config, generate: generatePreparedDraftForJob, limit: Math.min(5, results.enqueued) }).catch(error => {
+        console.warn(`Prepared draft backfill worker failed: ${error.message}`);
+      });
+    }, 0).unref?.();
+  }
+
+  return sendJson(res, 202, results);
+}
+
 async function handlePrivateNote(req, res) {
   const body = await readJsonBody(req);
   const accountId = body.account_id || body.conversation?.account_id || config.chatwootAccountId;
@@ -632,6 +723,10 @@ async function generatePreparedDraftForJob(row) {
       warnings
     }
   });
+  const nativeDraft = await writePreparedDraftToChatwoot({
+    row,
+    draft
+  });
 
   return {
     draft,
@@ -640,8 +735,53 @@ async function generatePreparedDraftForJob(row) {
     reasoning_summary: result.reasoning_summary,
     context_summary: summarizeContext(context),
     confidence: result.confidence,
-    warnings
+    warnings: uniqueStrings([...warnings, ...nativeDraft.warnings]),
+    inserted_at: nativeDraft.inserted_at
   };
+}
+
+async function writePreparedDraftToChatwoot({ row, draft }) {
+  const content = String(draft || '').trim();
+  if (!content) return { inserted_at: null, warnings: [] };
+
+  try {
+    const existing = await getDraftReply({
+      config,
+      accountId: row.account_id,
+      conversationId: row.conversation_id
+    });
+    const existingMessage = String(existing.message || '').trim();
+    const previousCopilotDraft = await getLatestInsertedPreparedDraft({
+      config,
+      accountId: row.account_id,
+      conversationId: row.conversation_id,
+      excludeId: row.id
+    });
+    const existingIsPreviousCopilotDraft = previousCopilotDraft?.draft
+      && sameDraftText(existingMessage, previousCopilotDraft.draft);
+    const canWrite = !existing.has_draft || !existingMessage || existingIsPreviousCopilotDraft;
+
+    if (!canWrite) {
+      return {
+        inserted_at: null,
+        warnings: ['Chatwoot already has a non-empty draft. The prepared draft was not inserted to avoid overwriting agent text.']
+      };
+    }
+
+    await prepareDraftReply({
+      config,
+      accountId: row.account_id,
+      conversationId: row.conversation_id,
+      content
+    });
+
+    return { inserted_at: new Date().toISOString(), warnings: [] };
+  } catch (error) {
+    return {
+      inserted_at: null,
+      warnings: [`Chatwoot native draft insert failed: ${error.message}`]
+    };
+  }
 }
 
 function buildPreparedDraftPrompt({ context, approvedMemories = [] }) {
@@ -869,6 +1009,76 @@ function normalizeChatMessages(messages) {
     .slice(-24);
 }
 
+function normalizeBackfillStatuses(value) {
+  const raw = Array.isArray(value) ? value : [value];
+  const statuses = raw.map(item => String(item || '').trim().toLowerCase()).filter(Boolean);
+  return statuses.length ? [...new Set(statuses)] : ['open', 'pending', 'snoozed'];
+}
+
+function extractConversationList(data = {}) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.payload)) return data.payload;
+  if (Array.isArray(data.conversations)) return data.conversations;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.data?.payload)) return data.data.payload;
+  if (Array.isArray(data.data?.conversations)) return data.data.conversations;
+  return [];
+}
+
+function latestPublicChatMessage(messages = []) {
+  const publicMessages = (Array.isArray(messages) ? messages : [])
+    .filter(message => message && message.private !== true)
+    .filter(message => String(message.message_type || '').toLowerCase() !== 'activity')
+    .sort((a, b) => messageTimestamp(a) - messageTimestamp(b));
+  return publicMessages.at(-1) || null;
+}
+
+function messageTimestamp(message = {}) {
+  const raw = message.created_at || message.createdAt || message.timestamp || 0;
+  if (typeof raw === 'number') return raw;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isIncomingMessageType(value) {
+  return value === 0 || value === '0' || String(value || '').toLowerCase() === 'incoming';
+}
+
+function preparedDraftWebhookFromConversation({ accountId, conversation = {}, latestMessage = {} }) {
+  const contact = latestMessage.sender || conversation.meta?.sender || {};
+  const displayId = conversation.display_id || conversation.id;
+  return {
+    event: 'message_created',
+    id: latestMessage.id,
+    message_type: latestMessage.message_type,
+    private: false,
+    content: latestMessage.content || latestMessage.processed_message_content || '',
+    content_attributes: latestMessage.content_attributes || {},
+    account: { id: accountId },
+    conversation: {
+      ...conversation,
+      id: displayId,
+      display_id: displayId
+    },
+    conversation_id: displayId,
+    sender: contact
+  };
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(number)));
+}
+
+function sameDraftText(left = '', right = '') {
+  return normalizeDraftForComparison(left) === normalizeDraftForComparison(right);
+}
+
+function normalizeDraftForComparison(value = '') {
+  return String(value || '').replace(/\r\n/g, '\n').trim();
+}
+
 function latestUserChatMessage(messages = []) {
   return [...messages].reverse().find(message => message?.role !== 'assistant')?.content || '';
 }
@@ -926,6 +1136,14 @@ async function readRawBody(req) {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function isRequestAbortError(error) {
+  if (!error) return false;
+  return error.code === 'ECONNRESET' ||
+    error.name === 'AbortError' ||
+    error.message === 'aborted' ||
+    error.message === 'The operation was aborted';
 }
 
 async function serveStatic(pathname, res) {

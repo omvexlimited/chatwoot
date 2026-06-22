@@ -35,3 +35,11 @@ test('segments remember command names', () => {
 
   assert.deepEqual(commands, ['/remember <text>', '/remember']);
 });
+
+test('segments order link commands', () => {
+  const commands = segmentCommandLinks('Use /linkorder #2280 to link it, or /unlinkorder to clear it.')
+    .filter(segment => segment.type === 'command')
+    .map(segment => segment.text);
+
+  assert.deepEqual(commands, ['/linkorder #2280', '/unlinkorder']);
+});

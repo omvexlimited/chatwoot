@@ -31,6 +31,22 @@ export async function createPrivateNote({ config, accountId, conversationId, con
   });
 }
 
+export async function getDraftReply({ config, accountId, conversationId }) {
+  if (!config.chatwootBaseUrl || !config.chatwootApiToken) {
+    throw new Error('Chatwoot API is not configured.');
+  }
+  if (!accountId || !conversationId) {
+    throw new Error('account_id and conversation_id are required.');
+  }
+
+  const url = `${config.chatwootBaseUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/draft_messages`;
+  const data = await chatwootRequest(config, url, { method: 'GET' });
+  return {
+    has_draft: Boolean(data?.has_draft),
+    message: String(data?.message || '')
+  };
+}
+
 export async function prepareDraftReply({ config, accountId, conversationId, content }) {
   if (!config.chatwootBaseUrl || !config.chatwootApiToken) {
     throw new Error('Chatwoot API is not configured.');
@@ -49,6 +65,20 @@ export async function prepareDraftReply({ config, accountId, conversationId, con
     })
   });
   return { ok: true };
+}
+
+export async function listConversations({ config, accountId, status = 'open', page = 1 }) {
+  if (!config.chatwootBaseUrl || !config.chatwootApiToken) {
+    throw new Error('Chatwoot API is not configured.');
+  }
+  if (!accountId) {
+    throw new Error('account_id is required.');
+  }
+
+  const url = new URL(`${config.chatwootBaseUrl}/api/v1/accounts/${accountId}/conversations`);
+  url.searchParams.set('status', status);
+  url.searchParams.set('page', String(page));
+  return chatwootRequest(config, url.toString(), { method: 'GET' });
 }
 
 async function chatwootRequest(config, url, options) {

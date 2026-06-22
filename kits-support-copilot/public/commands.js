@@ -36,6 +36,17 @@ export const COPILOT_COMMANDS = [
     keywords: ['issue', 'ticket', 'cancel']
   },
   {
+    command: '/linkorder <order>',
+    description: 'Link this conversation to a Shopify order.',
+    keywords: ['order', 'shopify', 'context'],
+    linkVariants: ['/linkorder']
+  },
+  {
+    command: '/unlinkorder',
+    description: 'Remove the manual order override.',
+    keywords: ['order', 'shopify', 'context']
+  },
+  {
     command: '/grammar',
     description: 'Fix spelling and grammar only.',
     keywords: ['spelling', 'correction']
@@ -56,7 +67,7 @@ export function filterCommandOptions(query = '') {
     const description = String(option.description || '').toLowerCase();
     const keywords = (option.keywords || []).join(' ').toLowerCase();
     return (
-      command.includes(normalizedQuery) ||
+      command.startsWith(normalizedQuery) ||
       description.includes(normalizedQuery) ||
       keywords.includes(normalizedQuery)
     );
@@ -99,6 +110,20 @@ export function replaceActiveSlashToken({ value = '', selectionStart = 0, select
   return { value: nextValue, cursor: nextCursor };
 }
 
+export function parseOrderLinkCommand(value = '') {
+  const content = String(value || '').trim();
+  const match = content.match(/^\/(un)?linkorder(?:\s+(.+))?$/i);
+  if (!match) return null;
+
+  if (match[1]) return { name: 'unlinkorder', orderRef: '' };
+
+  const orderMatch = String(match[2] || '').match(/#?\d{2,}/);
+  return {
+    name: 'linkorder',
+    orderRef: orderMatch ? normalizeOrderRef(orderMatch[0]) : ''
+  };
+}
+
 export function linkableCommandTexts() {
   const commands = [];
   const seen = new Set();
@@ -116,6 +141,11 @@ export function linkableCommandTexts() {
 
 function normalizeQuery(value = '') {
   return String(value || '').trim().replace(/^\/+/, '').toLowerCase();
+}
+
+function normalizeOrderRef(value = '') {
+  const clean = String(value || '').trim().replace(/^#?/, '');
+  return clean ? `#${clean}` : '';
 }
 
 function findTokenStart(text, cursor) {

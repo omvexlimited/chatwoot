@@ -22,6 +22,12 @@ const HELP_TEXT = [
   '/newticket cancel',
   'Discard the current order issue proposal.',
   '',
+  '/linkorder <order>',
+  'Link this conversation to a Shopify order for copilot context only. Example: /linkorder #1234',
+  '',
+  '/unlinkorder',
+  'Remove the manually linked order and return to automatic matching.',
+  '',
   '/grammar',
   'Correct spelling in the current draft only, without rewriting it.',
   '',
@@ -79,6 +85,12 @@ export function parseCopilotCommand(value = '') {
   if (command === '/grammar') {
     return { name: 'grammar', argument };
   }
+  if (command === '/linkorder') {
+    return { name: 'linkorder', argument };
+  }
+  if (command === '/unlinkorder') {
+    return { name: 'unlinkorder', argument };
+  }
   if (command === '/help') {
     return { name: 'help', argument };
   }
@@ -101,6 +113,9 @@ export async function runMemoryCommand({ command, config, context, agentEmail, s
   }
   if (command.name === 'unknown') {
     return commandResponse(`Unknown command: ${command.raw || 'unknown'}\n\nUse /help to see available commands.`);
+  }
+  if (command.name === 'linkorder' || command.name === 'unlinkorder') {
+    return commandResponse('This command is handled in the copilot browser UI. Refresh Chatwoot and try again if it did not update the context.');
   }
 
   if (!memoryConfigured(config)) {
