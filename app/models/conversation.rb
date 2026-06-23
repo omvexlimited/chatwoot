@@ -74,6 +74,8 @@ class Conversation < ApplicationRecord
   validates :uuid, uniqueness: true
   validate :validate_referer_url
 
+  before_validation :store_skip_auto_assignment
+
   enum status: { open: 0, resolved: 1, pending: 2, snoozed: 3 }
   enum priority: { low: 0, medium: 1, high: 2, urgent: 3 }
 
@@ -204,6 +206,11 @@ class Conversation < ApplicationRecord
     assignee_agent_bot || assignee
   end
 
+  def skip_auto_assignment?
+    ActiveModel::Type::Boolean.new.cast(skip_auto_assignment) ||
+      ActiveModel::Type::Boolean.new.cast(additional_attributes&.dig('skip_auto_assignment'))
+  end
+
   def tweet?
     inbox.inbox_type == 'Twitter' && additional_attributes['type'] == 'tweet'
   end
@@ -227,6 +234,12 @@ class Conversation < ApplicationRecord
     notify_status_change
     create_activity
     notify_conversation_updation
+  end
+
+  def store_skip_auto_assignment
+    return unless ActiveModel::Type::Boolean.new.cast(skip_auto_assignment)
+
+    self.additional_attributes = (additional_attributes || {}).merge('skip_auto_assignment' => true)
   end
 
   def handle_resolved_status_change

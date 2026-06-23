@@ -269,6 +269,39 @@ RSpec.describe Message do
       expect(conversation.open?).to be false
       expect(conversation.pending?).to be true
     end
+
+    it 'keeps reopened email conversations out of default auto assignment' do
+      account = create(:account)
+      account.enable_features('assignment_v2')
+      account.save!
+      email_inbox = create(:inbox, :with_email, account: account)
+      email_contact = create(:contact, account: account)
+      email_contact_inbox = create(:contact_inbox, contact: email_contact, inbox: email_inbox)
+      email_conversation = create(
+        :conversation,
+        account: account,
+        inbox: email_inbox,
+        contact: email_contact,
+        contact_inbox: email_contact_inbox,
+        status: :resolved,
+        assignee: nil
+      )
+
+      allow(AutoAssignment::AssignmentJob).to receive(:enqueue_for_inbox)
+
+      create(
+        :message,
+        account: account,
+        inbox: email_inbox,
+        conversation: email_conversation,
+        message_type: :incoming,
+        content_type: :incoming_email
+      )
+
+      expect(email_conversation.reload.open?).to be true
+      expect(email_conversation.additional_attributes['skip_auto_assignment']).to be true
+      expect(AutoAssignment::AssignmentJob).not_to have_received(:enqueue_for_inbox)
+    end
   end
 
   describe '#mark_pending_conversation_as_open_for_human_response' do

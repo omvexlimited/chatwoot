@@ -26,6 +26,7 @@ RSpec.describe Imap::ImapMailbox do
 
         expect(conversation.contact.email).to eq(inbound_mail.mail.from.first)
         expect(conversation.additional_attributes['source']).to eq('email')
+        expect(conversation.additional_attributes['skip_auto_assignment']).to be true
         expect(conversation.messages.empty?).to be false
       end
     end

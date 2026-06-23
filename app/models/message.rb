@@ -401,8 +401,10 @@ class Message < ApplicationRecord
   end
 
   def reopen_conversation
-    return if conversation.muted?
     return unless incoming?
+
+    skip_auto_assignment_for_email_conversation
+    return if conversation.muted?
 
     conversation.open! if conversation.snoozed?
 
@@ -435,6 +437,14 @@ class Message < ApplicationRecord
 
   def reopened_by_contact?
     incoming? && !private? && Current.user.class != sender.class && sender.instance_of?(Contact)
+  end
+
+  def skip_auto_assignment_for_email_conversation
+    return unless incoming_email? || inbox.email?
+    return if conversation.skip_auto_assignment?
+
+    conversation.skip_auto_assignment = true
+    conversation.save!
   end
 
   def execute_message_template_hooks

@@ -36,6 +36,7 @@ RSpec.describe Mailbox::ConversationFinderStrategies::NewConversationStrategy do
           expect(conversation.additional_attributes['source']).to eq('email')
           expect(conversation.additional_attributes['mail_subject']).to eq('Test Subject')
           expect(conversation.additional_attributes['initiated_at']).to have_key('timestamp')
+          expect(conversation.skip_auto_assignment?).to be true
         end
 
         it 'sets contact attributes correctly' do
