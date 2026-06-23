@@ -34,8 +34,7 @@ class ConversationBuilder
       custom_attributes: custom_attributes,
       snoozed_until: params[:snoozed_until],
       assignee_id: params[:assignee_id],
-      team_id: params[:team_id],
-      skip_auto_assignment: params[:skip_auto_assignment]
+      team_id: params[:team_id]
     }.merge(status)
   end
 end

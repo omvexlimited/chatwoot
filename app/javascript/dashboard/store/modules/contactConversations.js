@@ -11,14 +11,7 @@ export const createMessagePayload = (payload, message) => {
 };
 
 export const createConversationPayload = ({ params, contactId, files }) => {
-  const {
-    inboxId,
-    message,
-    sourceId,
-    mailSubject,
-    assigneeId,
-    skipAutoAssignment,
-  } = params;
+  const { inboxId, message, sourceId, mailSubject, assigneeId } = params;
   const payload = new FormData();
 
   if (message) {
@@ -33,39 +26,21 @@ export const createConversationPayload = ({ params, contactId, files }) => {
   payload.append('contact_id', contactId);
   payload.append('source_id', sourceId);
   payload.append('additional_attributes[mail_subject]', mailSubject);
-  if (assigneeId) {
-    payload.append('assignee_id', assigneeId);
-  }
-  if (skipAutoAssignment) {
-    payload.append('skip_auto_assignment', skipAutoAssignment);
-  }
+  payload.append('assignee_id', assigneeId);
 
   return payload;
 };
 
 export const createWhatsAppConversationPayload = ({ params }) => {
-  const {
-    inboxId,
-    message,
-    contactId,
-    sourceId,
-    assigneeId,
-    skipAutoAssignment,
-  } = params;
+  const { inboxId, message, contactId, sourceId, assigneeId } = params;
 
   const payload = {
     inbox_id: inboxId,
     contact_id: contactId,
     source_id: sourceId,
     message,
+    assignee_id: assigneeId,
   };
-
-  if (assigneeId) {
-    payload.assignee_id = assigneeId;
-  }
-  if (skipAutoAssignment) {
-    payload.skip_auto_assignment = skipAutoAssignment;
-  }
 
   return payload;
 };

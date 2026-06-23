@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue';
-import { contacts, activeContact, emailInbox } from './fixtures';
+import { contacts, activeContact, emailInbox, currentUser } from './fixtures';
 import ComposeNewConversationForm from '../ComposeNewConversationForm.vue';
 
 const selectedContact = ref(activeContact);
@@ -45,6 +45,7 @@ const onDiscard = () => {
           :contacts="contacts"
           contact-id=""
           :is-loading="false"
+          :current-user="currentUser"
           :selected-contact="selectedContact"
           :target-inbox="targetInbox"
           :is-creating-contact="false"
@@ -69,6 +70,7 @@ const onDiscard = () => {
           :contacts="contacts"
           contact-id=""
           :is-loading="false"
+          :current-user="currentUser"
           :selected-contact="{ ...selectedContact, contactInboxes: [] }"
           :target-inbox="null"
           :is-creating-contact="false"

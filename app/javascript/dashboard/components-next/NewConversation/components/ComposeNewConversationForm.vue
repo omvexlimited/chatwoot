@@ -32,6 +32,7 @@ const props = defineProps({
   contactId: { type: String, default: null },
   selectedContact: { type: Object, default: null },
   targetInbox: { type: Object, default: null },
+  currentUser: { type: Object, default: null },
   isCreatingContact: { type: Boolean, default: false },
   isFetchingInboxes: { type: Boolean, default: false },
   isLoading: { type: Boolean, default: false },
@@ -136,6 +137,7 @@ const newMessagePayload = () => {
     subject,
     ccEmails,
     bccEmails,
+    currentUser: props.currentUser,
     attachedFiles,
     directUploadsEnabled: props.isDirectUploadsEnabled,
   });
@@ -310,6 +312,7 @@ const handleSendWhatsappMessage = async ({ message, templateParams }) => {
     selectedContact: props.selectedContact,
     message,
     templateParams,
+    currentUser: props.currentUser,
   });
   await emit('createConversation', {
     payload: whatsappMessagePayload,
@@ -323,6 +326,7 @@ const handleSendTwilioMessage = async ({ message, templateParams }) => {
     selectedContact: props.selectedContact,
     message,
     templateParams,
+    currentUser: props.currentUser,
   });
   await emit('createConversation', {
     payload: twilioMessagePayload,

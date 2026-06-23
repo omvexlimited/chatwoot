@@ -32,19 +32,6 @@ shared_examples_for 'auto_assignment_handler' do
       expect(conversation.reload.assignee).to be_nil
     end
 
-    it 'will not auto assign agent if skip_auto_assignment is true' do
-      conversation = create(
-        :conversation,
-        account: account,
-        contact: create(:contact, account: account),
-        inbox: inbox,
-        assignee: nil,
-        skip_auto_assignment: true
-      )
-
-      expect(conversation.reload.assignee).to be_nil
-    end
-
     it 'will not auto assign agent if its a bot conversation' do
       conversation = create(
         :conversation,

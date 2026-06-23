@@ -55,7 +55,7 @@ describe('#actions', () => {
             contactId: 4,
             sourceId: 5,
             mailSubject: 'Mail Subject',
-            skipAutoAssignment: true,
+            assigneeId: 6,
             files: [],
           },
           isFromWhatsApp: false,
@@ -84,7 +84,7 @@ describe('#actions', () => {
             contactId: 4,
             sourceId: 5,
             mailSubject: 'Mail Subject',
-            skipAutoAssignment: true,
+            assigneeId: 6,
             files: ['file1.pdf', 'file2.jpg'],
           },
           isFromWhatsApp: false,
@@ -120,7 +120,7 @@ describe('#actions', () => {
             },
             contactId: 4,
             sourceId: 5,
-            skipAutoAssignment: true,
+            assigneeId: 6,
           },
           isFromWhatsApp: true,
         }
@@ -147,7 +147,7 @@ describe('#actions', () => {
               inboxId: 1,
               message: { content: 'hi' },
               contactId: 4,
-              skipAutoAssignment: true,
+              assigneeId: 6,
               sourceId: 5,
               mailSubject: 'Mail Subject',
             },
@@ -175,7 +175,7 @@ describe('#actions', () => {
               contactId: 4,
               sourceId: 5,
               mailSubject: 'Mail Subject',
-              skipAutoAssignment: true,
+              assigneeId: 6,
               files: ['file1.pdf', 'file2.jpg'],
             },
             isFromWhatsApp: false,
@@ -233,7 +233,7 @@ describe('createConversationPayload', () => {
         },
         sourceId: '12',
         mailSubject: 'Test Subject',
-        skipAutoAssignment: true,
+        assigneeId: '123',
       },
       contactId: '23',
       files: ['file1.pdf', 'file2.jpg'],
@@ -250,12 +250,11 @@ describe('createConversationPayload', () => {
     expect(payload.get('additional_attributes[mail_subject]')).toBe(
       options.params.mailSubject
     );
-    expect(payload.get('assignee_id')).toBeNull();
-    expect(payload.get('skip_auto_assignment')).toBe('true');
+    expect(payload.get('assignee_id')).toBe(options.params.assigneeId);
     expect(payload.getAll('message[attachments][]')).toEqual(options.files);
   });
 
-  it('creates conversation payload with explicit assignee when provided', () => {
+  it('creates conversation payload with message and without attachments', () => {
     const options = {
       params: {
         inboxId: '1',
@@ -283,36 +282,6 @@ describe('createConversationPayload', () => {
     expect(payload.get('assignee_id')).toBe(options.params.assigneeId);
     expect(payload.getAll('message[attachments][]')).toEqual([]);
   });
-
-  it('creates conversation payload with message and without attachments', () => {
-    const options = {
-      params: {
-        inboxId: '1',
-        message: {
-          content: 'Test message content',
-        },
-        sourceId: '12',
-        mailSubject: 'Test Subject',
-        skipAutoAssignment: true,
-      },
-      contactId: '23',
-    };
-
-    const payload = createConversationPayload(options);
-
-    expect(payload.get('message[content]')).toBe(
-      options.params.message.content
-    );
-    expect(payload.get('inbox_id')).toBe(options.params.inboxId);
-    expect(payload.get('contact_id')).toBe(options.contactId);
-    expect(payload.get('source_id')).toBe(options.params.sourceId);
-    expect(payload.get('additional_attributes[mail_subject]')).toBe(
-      options.params.mailSubject
-    );
-    expect(payload.get('assignee_id')).toBeNull();
-    expect(payload.get('skip_auto_assignment')).toBe('true');
-    expect(payload.getAll('message[attachments][]')).toEqual([]);
-  });
 });
 
 describe('createWhatsAppConversationPayload', () => {
@@ -324,7 +293,7 @@ describe('createWhatsAppConversationPayload', () => {
           content: 'Test message content',
         },
         sourceId: '12',
-        skipAutoAssignment: true,
+        assigneeId: '123',
       },
     };
 
@@ -333,7 +302,6 @@ describe('createWhatsAppConversationPayload', () => {
     expect(payload.message).toBe(options.params.message);
     expect(payload.inbox_id).toBe(options.params.inboxId);
     expect(payload.source_id).toBe(options.params.sourceId);
-    expect(payload.assignee_id).toBeUndefined();
-    expect(payload.skip_auto_assignment).toBe(true);
+    expect(payload.assignee_id).toBe(options.params.assigneeId);
   });
 });
