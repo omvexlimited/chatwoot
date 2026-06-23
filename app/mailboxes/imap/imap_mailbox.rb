@@ -101,8 +101,7 @@ class Imap::ImapMailbox
           initiated_at: {
             timestamp: Time.now.utc
           }
-        },
-        skip_auto_assignment: true
+        }
       }
     )
   end

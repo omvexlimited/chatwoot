@@ -33,10 +33,7 @@ class AutoAssignment::AssignmentService
   end
 
   def unassigned_conversations(limit)
-    scope = inbox.conversations
-                 .unassigned
-                 .open
-                 .where.not("additional_attributes @> ?::jsonb", { skip_auto_assignment: true }.to_json)
+    scope = inbox.conversations.unassigned.open
 
     # Apply conversation priority using assignment policy if available
     policy = inbox.assignment_policy

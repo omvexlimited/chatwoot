@@ -47,19 +47,6 @@ RSpec.describe AutoAssignment::AssignmentService do
         expect(conv.reload.assignee).to eq(agent)
       end
 
-      it 'skips conversations that opted out of auto assignment' do
-        skipped_conversation = create(:conversation, inbox: inbox, status: 'open', skip_auto_assignment: true)
-        skipped_conversation.update!(assignee_id: nil)
-        assignable_conversation = create(:conversation, inbox: inbox, status: 'open')
-        assignable_conversation.update!(assignee_id: nil)
-
-        assigned_count = service.perform_bulk_assignment(limit: 10)
-
-        expect(assigned_count).to eq(1)
-        expect(skipped_conversation.reload.assignee).to be_nil
-        expect(assignable_conversation.reload.assignee).to eq(agent)
-      end
-
       it 'returns 0 when no agents are online' do
         allow(OnlineStatusTracker).to receive(:get_available_users).and_return({})
 

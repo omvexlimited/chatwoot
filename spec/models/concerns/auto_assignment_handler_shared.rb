@@ -43,7 +43,6 @@ shared_examples_for 'auto_assignment_handler' do
       )
 
       expect(conversation.reload.assignee).to be_nil
-      expect(conversation.additional_attributes['skip_auto_assignment']).to be true
     end
 
     it 'will not auto assign agent if its a bot conversation' do

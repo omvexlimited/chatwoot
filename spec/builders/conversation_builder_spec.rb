@@ -35,8 +35,7 @@ describe ConversationBuilder do
         params: { skip_auto_assignment: true }
       ).perform
 
-      expect(conversation.skip_auto_assignment?).to be(true)
-      expect(conversation.additional_attributes['skip_auto_assignment']).to be(true)
+      expect(conversation.skip_auto_assignment).to be(true)
     end
 
     context 'when lock_to_single_conversation is true for sms inbox' do
