@@ -7,7 +7,7 @@ import {
 
 test('loads published playbook knowledge from Kits admin API', async () => {
   const calls = [];
-  const markdown = await fetchPublishedPlaybookKnowledge({
+  const knowledge = await fetchPublishedPlaybookKnowledge({
     config: {
       kitsAdminBaseUrl: 'https://admin.example.test',
       kitsInternalApiToken: 'secret'
@@ -29,22 +29,29 @@ test('loads published playbook knowledge from Kits admin API', async () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://admin.example.test/internal/kits-republic/playbooks/knowledge');
   assert.equal(calls[0].options.headers.Authorization, 'Bearer secret');
-  assert.match(markdown, /Knowledge source: Kits Republic Playbooks/);
-  assert.match(markdown, /Version: 2026-07-01T07:55:00Z/);
-  assert.match(markdown, /Published playbooks: 1/);
-  assert.match(markdown, /## Returns/);
-  assert.doesNotMatch(markdown, /Fallback guide/);
+  assert.equal(knowledge.source, 'kits_republic_playbooks');
+  assert.equal(knowledge.version, '2026-07-01T07:55:00Z');
+  assert.deepEqual(knowledge.warnings, []);
+  assert.match(knowledge.markdown, /Knowledge source: Kits Republic Playbooks/);
+  assert.match(knowledge.markdown, /Version: 2026-07-01T07:55:00Z/);
+  assert.match(knowledge.markdown, /Published playbooks: 1/);
+  assert.match(knowledge.markdown, /Published Playbook Index/);
+  assert.match(knowledge.markdown, /Returns/);
+  assert.match(knowledge.markdown, /## Returns/);
+  assert.doesNotMatch(knowledge.markdown, /Fallback guide/);
 });
 
 test('uses local fallback when Kits admin API is not configured', async () => {
-  const markdown = await fetchPublishedPlaybookKnowledge({
+  const knowledge = await fetchPublishedPlaybookKnowledge({
     config: {},
     fallbackKnowledgeBase: 'Local guide'
   });
 
-  assert.match(markdown, /Knowledge source: local fallback markdown/);
-  assert.match(markdown, /admin_api_not_configured/);
-  assert.match(markdown, /Local guide/);
+  assert.equal(knowledge.source, 'local_fallback_markdown');
+  assert.match(knowledge.markdown, /Knowledge source: local fallback markdown/);
+  assert.match(knowledge.markdown, /admin_api_not_configured/);
+  assert.match(knowledge.markdown, /Local guide/);
+  assert.match(knowledge.warnings[0], /admin_api_not_configured/);
 });
 
 test('uses local fallback when Kits admin API fails or returns empty knowledge', async () => {
@@ -57,9 +64,10 @@ test('uses local fallback when Kits admin API fails or returns empty knowledge',
     fetchImpl: async () => jsonResponse({ ok: false, error: 'nope' }, 500)
   });
 
-  assert.match(failed, /local fallback markdown/);
-  assert.match(failed, /admin_api_failed: nope/);
-  assert.match(failed, /Local guide/);
+  assert.match(failed.markdown, /local fallback markdown/);
+  assert.match(failed.markdown, /admin_api_failed: nope/);
+  assert.match(failed.markdown, /Local guide/);
+  assert.match(failed.warnings[0], /admin_api_failed: nope/);
 
   const empty = await fetchPublishedPlaybookKnowledge({
     config: {
@@ -70,8 +78,8 @@ test('uses local fallback when Kits admin API fails or returns empty knowledge',
     fetchImpl: async () => jsonResponse({ ok: true, knowledge_markdown: '' })
   });
 
-  assert.match(empty, /admin_api_returned_empty_knowledge/);
-  assert.match(empty, /Local guide/);
+  assert.match(empty.markdown, /admin_api_returned_empty_knowledge/);
+  assert.match(empty.markdown, /Local guide/);
 });
 
 test('caches playbook knowledge for a short window', async () => {
@@ -96,11 +104,48 @@ test('caches playbook knowledge for a short window', async () => {
     }
   });
 
-  assert.match(await getKnowledge(), /Playbook 1/);
+  assert.match((await getKnowledge()).markdown, /Playbook 1/);
   currentTime = 1050;
-  assert.match(await getKnowledge(), /Playbook 1/);
+  assert.match((await getKnowledge()).markdown, /Playbook 1/);
   currentTime = 1150;
-  assert.match(await getKnowledge(), /Playbook 2/);
+  assert.match((await getKnowledge()).markdown, /Playbook 2/);
+  assert.equal(calls, 2);
+});
+
+test('uses stale playbook knowledge when a refresh fails after a successful load', async () => {
+  let currentTime = 1000;
+  let calls = 0;
+  const getKnowledge = createPlaybookKnowledgeProvider({
+    config: {
+      kitsAdminBaseUrl: 'https://admin.example.test',
+      kitsInternalApiToken: 'secret',
+      playbookKnowledgeCacheMs: 100
+    },
+    fallbackKnowledgeBase: 'Local guide',
+    now: () => currentTime,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return jsonResponse({
+          ok: true,
+          version: 'fresh',
+          knowledge_markdown: '## Fresh Playbook',
+          playbooks: []
+        });
+      }
+      throw new Error('network down');
+    }
+  });
+
+  const fresh = await getKnowledge();
+  assert.match(fresh.markdown, /Fresh Playbook/);
+  assert.deepEqual(fresh.warnings, []);
+
+  currentTime = 1200;
+  const stale = await getKnowledge();
+  assert.match(stale.markdown, /Fresh Playbook/);
+  assert.match(stale.warnings.join('\n'), /network down/);
+  assert.match(stale.warnings.join('\n'), /last successfully loaded Playbooks/);
   assert.equal(calls, 2);
 });
 

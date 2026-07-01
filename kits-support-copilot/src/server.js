@@ -66,7 +66,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, '..', 'public');
 const config = loadConfig();
 const fallbackKnowledgeBase = await loadKnowledgeBase();
-const getKnowledgeBase = createPlaybookKnowledgeProvider({ config, fallbackKnowledgeBase });
+const getKnowledge = createPlaybookKnowledgeProvider({ config, fallbackKnowledgeBase });
 await ensureMemoryTable({ config }).catch(error => {
   console.warn(`KR Copilot memory disabled: ${error.message}`);
 });
@@ -195,9 +195,10 @@ async function handleSuggestReply(req, res) {
   });
   fallback.warnings.push(...context.warnings);
 
-  const knowledgeBase = await getKnowledgeBase();
+  const knowledge = await getKnowledge();
+  fallback.warnings.push(...(knowledge.warnings || []));
   const prompt = buildPrompt({
-    knowledgeBase,
+    knowledgeBase: knowledge.markdown,
     conversationText: context.conversationText,
     shopifyContext: context.shopifyContext,
     latestMessage: context.latestMessage,
@@ -237,7 +238,7 @@ async function handleSuggestReply(req, res) {
     response_language: context.responseLanguage,
     support_case: context.supportCase,
     confidence: result.confidence,
-    warnings: uniqueStrings([...(result.warnings || []), ...context.warnings])
+    warnings: uniqueStrings([...(result.warnings || []), ...(knowledge.warnings || []), ...context.warnings])
   });
 }
 
@@ -362,11 +363,20 @@ async function handleCopilotChat(req, res) {
     shopifyContext: context.shopifyContext,
     latestMessage: context.latestMessage
   });
-  fallbackDraft.warnings.push(...context.warnings, ...memoryResult.warnings);
+  const knowledge = await getKnowledge();
+  fallbackDraft.warnings.push(...context.warnings, ...memoryResult.warnings, ...(knowledge.warnings || []));
+  const fallbackBriefing = buildAgentBriefing({
+    context,
+    result: {
+      reasoning_summary: fallbackDraft.reasoning_summary,
+      warnings: fallbackDraft.warnings
+    }
+  });
 
   const fallback = {
-    assistant_message: buildFallbackAssistantMessage({ context: responseContext, currentDraft, agentConfirmedFacts }),
+    assistant_message: formatAgentBriefingForChat(fallbackBriefing),
     draft: currentDraft || fallbackDraft.draft,
+    agent_briefing: fallbackBriefing,
     reasoning_summary: currentDraft
       ? 'OpenAI was unavailable, so the existing draft was preserved.'
       : fallbackDraft.reasoning_summary,
@@ -374,9 +384,8 @@ async function handleCopilotChat(req, res) {
     warnings: fallbackDraft.warnings
   };
 
-  const knowledgeBase = await getKnowledgeBase();
   const prompt = buildCopilotChatPrompt({
-    knowledgeBase,
+    knowledgeBase: knowledge.markdown,
     conversationText: context.conversationText,
     shopifyContext: context.shopifyContext,
     latestMessage: context.latestMessage,
@@ -395,11 +404,6 @@ async function handleCopilotChat(req, res) {
   });
 
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
-  const assistantMessage = normalizeAssistantMessage({
-    assistantMessage: result.assistant_message,
-    agentConfirmedFacts,
-    chatMessages
-  });
   const draft = enforceDraftRequirements({
     draft: result.draft,
     supportCase: context.supportCase,
@@ -407,6 +411,20 @@ async function handleCopilotChat(req, res) {
     responseLanguage: effectiveResponseLanguage,
     deliveryEstimateContext: context.deliveryEstimateContext,
     latestMessage: context.latestMessage
+  });
+  const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...(knowledge.warnings || [])]);
+  const agentBriefing = normalizeAgentBriefing(result.agent_briefing, {
+    context,
+    result: {
+      ...result,
+      draft,
+      warnings
+    }
+  });
+  const assistantMessage = normalizeAssistantMessage({
+    assistantMessage: result.agent_briefing ? formatAgentBriefingForChat(agentBriefing) : result.assistant_message,
+    agentConfirmedFacts,
+    chatMessages
   });
 
   return sendCopilotChatResponse(res, {
@@ -416,9 +434,10 @@ async function handleCopilotChat(req, res) {
     draft,
     reasoningSummary: result.reasoning_summary,
     confidence: result.confidence,
-    warnings: [...(result.warnings || []), ...memoryResult.warnings],
+    warnings,
     agentConfirmedFacts,
-    approvedMemories: memoryResult.memories
+    approvedMemories: memoryResult.memories,
+    agentBriefing
   });
 }
 
@@ -533,11 +552,13 @@ function sendCopilotChatResponse(res, {
   approvedMemories = [],
   preserveDraft = false,
   skipInsert = false,
-  pendingIssue = null
+  pendingIssue = null,
+  agentBriefing = null
 }) {
   return sendJson(res, 200, {
     assistant_message: assistantMessage,
     draft,
+    agent_briefing: agentBriefing,
     reasoning_summary: reasoningSummary,
     shopify_context: context.shopifyContext,
     provider_context: context.providerContext,
@@ -852,7 +873,8 @@ async function generatePreparedDraftForJob(row) {
     shopifyContext: context.shopifyContext,
     latestMessage: context.latestMessage
   });
-  fallbackDraft.warnings.push(...context.warnings, ...memoryResult.warnings);
+  const knowledge = await getKnowledge();
+  fallbackDraft.warnings.push(...context.warnings, ...memoryResult.warnings, ...(knowledge.warnings || []));
 
   const fallbackBriefing = buildAgentBriefing({
     context,
@@ -869,11 +891,10 @@ async function generatePreparedDraftForJob(row) {
     confidence: fallbackDraft.confidence,
     warnings: fallbackDraft.warnings
   };
-  const knowledgeBase = await getKnowledgeBase();
   const prompt = buildPreparedDraftPrompt({
     context,
     approvedMemories: memoryResult.memories,
-    knowledgeBase
+    knowledgeBase: knowledge.markdown
   });
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
   const draft = enforceDraftRequirements({
@@ -884,7 +905,7 @@ async function generatePreparedDraftForJob(row) {
     deliveryEstimateContext: context.deliveryEstimateContext,
     latestMessage: context.latestMessage
   });
-  const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...context.warnings]);
+  const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...(knowledge.warnings || []), ...context.warnings]);
   const agentBriefing = normalizeAgentBriefing(result.agent_briefing, {
     context,
     result: {
@@ -976,7 +997,8 @@ function buildPreparedDraftPrompt({ context, approvedMemories = [], knowledgeBas
       [
         'Return strict JSON only with keys: assistant_message, draft, agent_briefing, reasoning_summary, confidence, warnings.',
         'assistant_message is internal and must be written in Spanish for the support agent.',
-        'agent_briefing is internal and must be a JSON object in Spanish with keys: summary, detected_case, action_required, before_sending_checklist, customer_reply_summary, risks_or_warnings.',
+        'agent_briefing is internal and must be a JSON object in Spanish with keys: summary, detected_case, playbook_used, decision_path, verified_facts, missing_information, recommended_decision, action_required, before_sending_checklist, customer_reply_summary, post_send_action, risks_or_warnings.',
+        'Use the published Playbook documentation and Decision Tree when relevant. Include the selected Playbook and tree path in agent_briefing, not in the customer draft.',
         'before_sending_checklist must explicitly list any manual Shopify/admin/supplier action needed before sending the customer reply.',
         'If no manual action is needed, before_sending_checklist must include exactly: "No hace falta acción manual. Revisa el borrador y envíalo si está correcto."',
         'Never put agent_briefing content inside the customer draft.'

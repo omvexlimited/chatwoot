@@ -111,6 +111,15 @@ test('builds iterative chat prompt with current draft and chat history', () => {
 
   assert.match(prompt.system, /internal support chat assistant/);
   assert.match(prompt.system, /specific playbook case/);
+  assert.match(prompt.system, /Published Playbooks source-of-truth rule/);
+  assert.match(prompt.system, /Published Playbook Index/);
+  assert.match(prompt.system, /Decision Tree/);
+  assert.match(prompt.system, /select the most relevant Playbook/);
+  assert.match(prompt.system, /agent_briefing as a JSON object in Spanish/);
+  assert.match(prompt.system, /playbook_used/);
+  assert.match(prompt.system, /decision_path/);
+  assert.match(prompt.system, /post_send_action/);
+  assert.match(prompt.system, /Return strict JSON only with keys: assistant_message, draft, agent_briefing, reasoning_summary, confidence, warnings/);
   assert.match(prompt.system, /delivered size exchange/);
   assert.match(prompt.system, /6BMDASXWXFS2/);
   assert.match(prompt.system, /Apple Pay\/no confirmation email/);
@@ -451,7 +460,8 @@ test('allows agent-confirmed supplier replacement facts and keeps assistant lang
   assert.match(prompt.user, /Agent confirmed facts/);
   assert.match(prompt.user, /supplier_confirmed/);
   assert.match(prompt.user, /replacement_processed/);
-  assert.match(prompt.user, /assistant_message may use Spanish, but draft must be written in English/);
+  assert.match(prompt.user, /assistant_message and agent_briefing must be written in Spanish/);
+  assert.match(prompt.user, /draft must be written in English/);
   assert.match(prompt.user, /translate the requested meaning into English/);
   assert.match(prompt.user, /ya lo hemos reportado al supplier/);
   assert.doesNotMatch(prompt.system, /Never send, claim to send, refund, replace, cancel, escalate, or modify anything/);

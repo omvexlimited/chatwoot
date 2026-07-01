@@ -277,6 +277,7 @@ export function buildPreparedDraftPayload(row = {}) {
 export function buildAgentBriefing({ context = {}, result = {}, fallbackMessage = '' } = {}) {
   const detectedCase = inferDetectedCase(context);
   const actionChecklist = actionChecklistForCase({ detectedCase, context });
+  const caseReview = context.caseReview || {};
   const warnings = [
     ...normalizeArray(result.warnings),
     ...normalizeArray(context.warnings)
@@ -285,9 +286,15 @@ export function buildAgentBriefing({ context = {}, result = {}, fallbackMessage 
   return {
     summary: clean(result.reasoning_summary) || clean(fallbackMessage) || 'Borrador preparado para revisión humana.',
     detected_case: detectedCase,
-    action_required: actionChecklist.some(item => !/^No manual action/i.test(item)),
+    playbook_used: playbookForCase(detectedCase),
+    decision_path: decisionPathForCase({ detectedCase, caseReview }),
+    verified_facts: normalizeArray(caseReview.verified_facts),
+    missing_information: normalizeArray(caseReview.missing_info),
+    recommended_decision: clean(caseReview.recommended_decision) || 'Revisar el caso con el Playbook aplicable antes de enviar.',
+    action_required: actionChecklist.some(item => !/^(No manual action|No hace falta acción manual)/i.test(item)),
     before_sending_checklist: actionChecklist,
     customer_reply_summary: customerReplySummary({ detectedCase, context }),
+    post_send_action: postSendAction(caseReview.after_send_action),
     risks_or_warnings: [...new Set(warnings)].slice(0, 8)
   };
 }
@@ -301,6 +308,17 @@ export function normalizeAgentBriefing(value, fallback) {
   return {
     summary: clean(value.summary) || fallbackBriefing.summary,
     detected_case: clean(value.detected_case) || fallbackBriefing.detected_case,
+    playbook_used: clean(value.playbook_used) || fallbackBriefing.playbook_used,
+    decision_path: normalizeArray(value.decision_path).length
+      ? normalizeArray(value.decision_path)
+      : fallbackBriefing.decision_path,
+    verified_facts: normalizeArray(value.verified_facts).length
+      ? normalizeArray(value.verified_facts)
+      : fallbackBriefing.verified_facts,
+    missing_information: normalizeArray(value.missing_information).length
+      ? normalizeArray(value.missing_information)
+      : fallbackBriefing.missing_information,
+    recommended_decision: clean(value.recommended_decision) || fallbackBriefing.recommended_decision,
     action_required: typeof value.action_required === 'boolean' ? value.action_required : fallbackBriefing.action_required,
     before_sending_checklist: normalizeArray(value.before_sending_checklist).length
       ? normalizeArray(value.before_sending_checklist)
@@ -308,6 +326,7 @@ export function normalizeAgentBriefing(value, fallback) {
     customer_reply_summary: normalizeArray(value.customer_reply_summary).length
       ? normalizeArray(value.customer_reply_summary)
       : fallbackBriefing.customer_reply_summary,
+    post_send_action: clean(value.post_send_action) || fallbackBriefing.post_send_action,
     risks_or_warnings: normalizeArray(value.risks_or_warnings).length
       ? normalizeArray(value.risks_or_warnings)
       : fallbackBriefing.risks_or_warnings
@@ -322,6 +341,30 @@ export function formatAgentBriefingForChat(briefing = {}) {
   if (briefing.detected_case) {
     lines.push('', `Caso detectado: ${briefing.detected_case}.`);
   }
+  if (briefing.playbook_used) {
+    lines.push(`Playbook/SOP aplicado: ${briefing.playbook_used}.`);
+  }
+  if (briefing.recommended_decision) {
+    lines.push(`Decisión recomendada: ${briefing.recommended_decision}.`);
+  }
+
+  const decisionPath = normalizeArray(briefing.decision_path);
+  if (decisionPath.length) {
+    lines.push('', 'Camino de decisión:');
+    lines.push(...decisionPath.map(item => `- ${item}`));
+  }
+
+  const facts = normalizeArray(briefing.verified_facts);
+  if (facts.length) {
+    lines.push('', 'Hechos verificados:');
+    lines.push(...facts.map(item => `- ${item}`));
+  }
+
+  const missing = normalizeArray(briefing.missing_information);
+  if (missing.length) {
+    lines.push('', 'Falta comprobar:');
+    lines.push(...missing.map(item => `- ${item}`));
+  }
 
   lines.push('', 'Acción necesaria antes de enviar:');
   const checklist = normalizeArray(briefing.before_sending_checklist);
@@ -335,6 +378,10 @@ export function formatAgentBriefingForChat(briefing = {}) {
   if (summary.length) {
     lines.push('', 'Resumen de respuesta al cliente:');
     lines.push(...summary.map(item => `- ${item}`));
+  }
+
+  if (briefing.post_send_action) {
+    lines.push('', `Después de enviar: ${briefing.post_send_action}.`);
   }
 
   const warnings = normalizeArray(briefing.risks_or_warnings);
@@ -663,6 +710,53 @@ function customerReplySummary({ detectedCase, context }) {
     return ['Pedir los datos que faltan para localizar el pedido sin inventar estado ni tracking.'];
   }
   return ['Responder al último mensaje del cliente usando el contexto del pedido seleccionado.'];
+}
+
+function playbookForCase(detectedCase = '') {
+  return {
+    payment_dispute: 'Payment Dispute / Chargeback Risk',
+    chargeback_risk: 'Payment Dispute / Chargeback Risk',
+    legal_threat: 'Payment Dispute / Chargeback Risk',
+    return_request: 'Returns And Refunds General',
+    refund_request: 'Returns And Refunds General',
+    refund_or_cancel_request: 'Returns And Refunds General',
+    delivered_not_found: 'Delivered But Not Received',
+    customs_pending: 'Customs / Local Handoff',
+    failed_delivery_attempt: 'Customs / Local Handoff',
+    tracking_not_recognized: 'Tracking Not Recognized',
+    tracking_update: 'Tracking / Shipping Updates',
+    product_mismatch: 'Product Mismatch / Different From Advertised',
+    wrong_item: 'Wrong Item',
+    supplier_issue_open: 'Supplier Issue Open',
+    invoice_request: 'Invoice Requests',
+    size_issue: 'Size Fit Complaints / Size Returns',
+    size_change_request: 'Size Change Before Shipment / Size Returns',
+    address_change_request: 'Address Change',
+    duplicate_thread: 'Duplicate Thread'
+  }[detectedCase] || 'No hay Playbook específico confirmado';
+}
+
+function decisionPathForCase({ detectedCase = '', caseReview = {} } = {}) {
+  const path = [];
+  if (caseReview.summary) path.push(`Resumen del caso: ${caseReview.summary}`);
+  if (caseReview.recommended_decision) {
+    path.push(`Criterio SOP para ${detectedCase || 'general_support'}: ${caseReview.recommended_decision}`);
+  }
+  if (caseReview.after_send_action) {
+    path.push(`Acción posterior indicada por el case review: ${postSendAction(caseReview.after_send_action)}`);
+  }
+  return path.length ? path : ['No hay árbol específico confirmado; aplicar documentación del Playbook y contexto verificado.'];
+}
+
+function postSendAction(value = '') {
+  return {
+    resolve: 'resolver',
+    leave_open: 'dejar_abierto',
+    wait_customer: 'esperar_cliente',
+    wait_supplier: 'esperar_proveedor',
+    mark_duplicate: 'marcar_duplicado',
+    manual_review: 'revisar_manual'
+  }[String(value || '').trim()] || 'revisar_manual';
 }
 
 function hasTracking(fulfillment = {}) {

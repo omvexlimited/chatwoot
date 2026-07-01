@@ -180,6 +180,14 @@ test('builds actionable agent briefing for size change requests', () => {
       latestMessage: 'Hi, can you switch both shirts to XXL instead of XL?',
       conversationText: '',
       warnings: [],
+      caseReview: {
+        summary: 'Customer asks for a size change before shipment.',
+        detected_case: 'size_change_request',
+        verified_facts: ['Selected Shopify order: #1001.'],
+        missing_info: [],
+        recommended_decision: 'Update the size only if the internal change is confirmed.',
+        after_send_action: 'leave_open'
+      },
       shopifyContext: {
         selected_order: {
           name: '#1001',
@@ -195,6 +203,11 @@ test('builds actionable agent briefing for size change requests', () => {
   });
 
   assert.equal(briefing.detected_case, 'size_change_request');
+  assert.match(briefing.playbook_used, /Size Change/);
+  assert.match(briefing.recommended_decision, /internal change is confirmed/);
+  assert.match(briefing.decision_path.join('\n'), /Customer asks for a size change/);
+  assert.match(briefing.verified_facts.join('\n'), /#1001/);
+  assert.equal(briefing.post_send_action, 'dejar_abierto');
   assert.equal(briefing.action_required, true);
   assert.match(briefing.before_sending_checklist.join('\n'), /#1001/);
   assert.match(briefing.before_sending_checklist.join('\n'), /XL a XXL/);
@@ -203,13 +216,25 @@ test('builds actionable agent briefing for size change requests', () => {
 test('formats agent briefing for the copilot chat bubble', () => {
   const text = formatAgentBriefingForChat({
     detected_case: 'tracking_update',
+    playbook_used: 'Tracking / Shipping Updates',
+    decision_path: ['Question: tracking state > Action: explain status'],
+    verified_facts: ['Tracking number: GV123GB.'],
+    missing_information: ['No delivery proof yet.'],
+    recommended_decision: 'Explain the tracking status.',
     before_sending_checklist: ['Review the draft and send if correct.'],
     customer_reply_summary: ['Explain the shipment status.'],
+    post_send_action: 'dejar_abierto',
     risks_or_warnings: ['Email differs from Shopify order email.']
   });
 
   assert.match(text, /Borrador preparado/);
+  assert.match(text, /Playbook\/SOP aplicado/);
+  assert.match(text, /Decisión recomendada/);
+  assert.match(text, /Camino de decisión/);
+  assert.match(text, /Hechos verificados/);
+  assert.match(text, /Falta comprobar/);
   assert.match(text, /Acción necesaria antes de enviar/);
   assert.match(text, /Resumen de respuesta al cliente/);
+  assert.match(text, /Después de enviar/);
   assert.match(text, /Avisos/);
 });

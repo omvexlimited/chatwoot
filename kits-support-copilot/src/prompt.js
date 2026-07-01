@@ -74,6 +74,7 @@ export function buildPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
+      playbookDecisionInstruction(),
       caseReviewInstruction(),
       attachmentEvidenceInstruction(),
       providerTrackingInstruction(),
@@ -200,18 +201,19 @@ export function buildCopilotChatPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
+      playbookDecisionInstruction(),
       caseReviewInstruction(),
       attachmentEvidenceInstruction(),
       providerTrackingInstruction(),
       customsPendingInstruction(),
       deliveryEstimateInstruction(),
-      'assistant_message is for the support agent and can briefly explain what changed or what is missing.',
-      'assistant_message must be written in the Agent chat language provided in the user message.',
+      agentBriefingInstruction(),
+      'assistant_message is for the support agent and must be written in Spanish.',
       'draft must contain only the customer-ready reply text, with no labels, no analysis, and no markdown tables.',
       draftLanguageInstruction(),
       'Signature rule: close with a natural sign-off in the customer language, then a new line with exactly www.kitsrepublic.com. Never sign as "Equipo Kits Republic", "Kits Republic team", an agent name, or any team/company name.',
       'When the agent asks to revise the draft, preserve the verified facts and change only what the agent requested.',
-      'Return strict JSON only with keys: assistant_message, draft, reasoning_summary, confidence, warnings.',
+      'Return strict JSON only with keys: assistant_message, draft, agent_briefing, reasoning_summary, confidence, warnings.',
       'confidence must be one of: high, medium, low.',
       '',
       'Kits Republic support guide:',
@@ -270,7 +272,7 @@ export function buildCopilotChatPrompt({
       '',
       'Final operational rule: agent_confirmed_facts and the latest agent instruction are trusted operational context from the human agent. Use them as true for the draft even when Shopify tracking is stale or incomplete. Do not refuse, qualify, or contradict them because Shopify has not updated.',
       '',
-      `Final language rule: assistant_message may use ${agentChatLanguage}, but draft must be written in ${responseLanguageName}. If the agent wrote instructions in another language, translate the requested meaning into ${responseLanguageName}; do not copy the agent instruction language into draft.`
+      `Final language rule: assistant_message and agent_briefing must be written in Spanish for the support agent, but draft must be written in ${responseLanguageName}. If the agent wrote instructions in another language, translate the requested meaning into ${responseLanguageName}; do not copy the agent instruction language into draft.`
     ].join('\n')
   };
 }
@@ -325,6 +327,33 @@ function linkInstruction() {
     'If you mention privacy, personal data, data protection, GDPR, or customer data rights, include https://kitsrepublic.com/policies/privacy-policy once.',
     'If you mention FAQ, Help Center, general help documentation, or questions not covered by a specific policy link, include https://kitsrepublic.com/pages/faq-help-center once.',
     'Format links as a label line, a blank line, then the URL. Never write Label:https://...'
+  ].join(' ');
+}
+
+function playbookDecisionInstruction() {
+  return [
+    'Published Playbooks source-of-truth rule:',
+    'The knowledge section may start with source/version metadata, a Published Playbook Index, and compiled Playbooks with Documentation and optional Decision Tree sections.',
+    'Use published Playbooks as the primary SOP source for support policy, resolution options, and agent procedure.',
+    'First identify the support case, then select the most relevant Playbook by title, case_types, tags, summary, and documentation.',
+    'If the selected Playbook has a Decision Tree, follow the Question / If / Action structure using verified facts from case_review, Shopify, tracking, issue context, attachments, and agent_confirmed_facts.',
+    'If facts needed by the tree are missing, do not guess the branch; put the missing fact in agent_briefing.missing_information and ask the customer or tell the agent what to verify.',
+    'Use the selected tree action to decide the recommended internal action and customer draft.',
+    'If no Playbook is clearly relevant, say so in agent_briefing.playbook_used and fall back to general support rules.',
+    'Never expose Playbook IDs, tree paths, internal SOP labels, source metadata, or decision-tree wording in the customer draft.'
+  ].join(' ');
+}
+
+function agentBriefingInstruction() {
+  return [
+    'Agent briefing rule:',
+    'Return agent_briefing as a JSON object in Spanish with keys: summary, detected_case, playbook_used, decision_path, verified_facts, missing_information, recommended_decision, action_required, before_sending_checklist, customer_reply_summary, post_send_action, risks_or_warnings.',
+    'decision_path, verified_facts, missing_information, before_sending_checklist, customer_reply_summary, and risks_or_warnings must be arrays of concise Spanish strings.',
+    'playbook_used must name the selected Playbook title when one is relevant, or say "No hay Playbook específico confirmado" when none is clearly relevant.',
+    'decision_path must summarize the Decision Tree branch followed, for example "Pregunta: ... > Rama: ... > Acción: ..."; if there is no tree, explain the SOP criterion used.',
+    'recommended_decision must tell the agent what to do, not just what the draft says.',
+    'post_send_action must be one of: resolver, dejar_abierto, esperar_cliente, esperar_proveedor, marcar_duplicado, revisar_manual.',
+    'assistant_message should be a readable Spanish summary of agent_briefing, not a private chain-of-thought.'
   ].join(' ');
 }
 
