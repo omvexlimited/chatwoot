@@ -110,6 +110,108 @@ test('detects delay question with fulfilled local-carrier tracking as medium con
   assert.ok(supportCase.reasons.includes('customer_waiting_or_delay_question'));
 });
 
+test('detects failed delivery attempt from provider tracking', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'Royal Mail says there was a delivery attempt.',
+    conversationText: '',
+    providerTrackingContext: {
+      available: true,
+      last_record: 'Delivery Attempt Failed',
+      normalized_status: 'delivery_attempt_failed'
+    },
+    shopifyContext: shopifyContext({
+      carrier: 'Royal Mail',
+      trackingNumber: 'GV548675650GB',
+      displayStatus: 'OUT_FOR_DELIVERY',
+      inTransitAt: '2026-06-27T08:26:10Z'
+    })
+  });
+
+  assert.equal(supportCase.type, 'failed_delivery_attempt');
+  assert.equal(supportCase.confidence, 'high');
+});
+
+test('detects delivered not found when customer disputes delivered status', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'It says delivered but I have not received the parcel.',
+    conversationText: '',
+    shopifyContext: shopifyContext({
+      carrier: 'Royal Mail',
+      trackingNumber: 'GV499951597GB',
+      deliveredAt: '2026-06-09T12:00:00Z',
+      displayStatus: 'DELIVERED'
+    })
+  });
+
+  assert.equal(supportCase.type, 'delivered_not_found');
+  assert.equal(supportCase.confidence, 'high');
+});
+
+test('detects return request without requiring selected logistics state', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'I want to return my jersey.',
+    conversationText: '',
+    shopifyContext: shopifyContext()
+  });
+
+  assert.equal(supportCase.type, 'return_request');
+});
+
+test('detects wrong item report', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'I received the wrong jersey.',
+    conversationText: '',
+    shopifyContext: shopifyContext()
+  });
+
+  assert.equal(supportCase.type, 'wrong_item');
+});
+
+test('detects product mismatch report', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'The front is different from the photo on the website.',
+    conversationText: '',
+    shopifyContext: shopifyContext()
+  });
+
+  assert.equal(supportCase.type, 'product_mismatch');
+});
+
+test('detects invoice request', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'Can you send me an invoice for my order?',
+    conversationText: '',
+    shopifyContext: shopifyContext()
+  });
+
+  assert.equal(supportCase.type, 'invoice_request');
+});
+
+test('detects duplicate thread signal', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'This is a duplicate, we already answered in the other thread.',
+    conversationText: '',
+    shopifyContext: shopifyContext()
+  });
+
+  assert.equal(supportCase.type, 'duplicate_thread');
+});
+
+test('detects open supplier issue when no stronger customer case is present', () => {
+  const supportCase = detectSupportCase({
+    latestMessage: 'Any update?',
+    conversationText: '',
+    shopifyContext: shopifyContext(),
+    issueContext: {
+      available: true,
+      total: 1,
+      issues: [{ issue_id: 22, status: 'open', issue_type: 'stock' }]
+    }
+  });
+
+  assert.equal(supportCase.type, 'supplier_issue_open');
+});
+
 function shopifyContext({
   name = '#1421',
   countryCode = 'ES',

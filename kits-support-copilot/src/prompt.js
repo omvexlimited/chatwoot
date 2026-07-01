@@ -37,7 +37,9 @@ export function buildPrompt({
   supportCase,
   deliveryEstimateContext,
   providerTrackingContext,
-  issueContext
+  issueContext,
+  attachmentAnalysis,
+  caseReview
 }) {
   const responseLanguageHint = formatResponseLanguageHint(responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext }));
   const responseLanguageName = responseLanguage?.language || inferResponseLanguage({ latestMessage, shopifyContext }).language || 'English';
@@ -47,6 +49,8 @@ export function buildPrompt({
   const deliveryTimingGuidance = JSON.stringify(buildDeliveryTimingGuidance(deliveryEstimateContext), null, 2);
   const providerTrackingSummary = JSON.stringify(providerTrackingContext || null, null, 2);
   const issueContextSummary = JSON.stringify(issueContext || null, null, 2);
+  const attachmentAnalysisSummary = JSON.stringify(attachmentAnalysis || null, null, 2);
+  const caseReviewSummary = JSON.stringify(caseReview || null, null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
   return {
@@ -70,6 +74,8 @@ export function buildPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
+      caseReviewInstruction(),
+      attachmentEvidenceInstruction(),
       providerTrackingInstruction(),
       customsPendingInstruction(),
       deliveryEstimateInstruction(),
@@ -96,6 +102,9 @@ export function buildPrompt({
       'Support case:',
       supportCaseSummary,
       '',
+      'Case review:',
+      caseReviewSummary,
+      '',
       'Customs context:',
       customsContext,
       '',
@@ -110,6 +119,9 @@ export function buildPrompt({
       '',
       'Open ticket context:',
       issueContextSummary,
+      '',
+      'Attachment image analysis:',
+      attachmentAnalysisSummary,
       '',
       'Shopify context:',
       shopifySummary
@@ -131,7 +143,9 @@ export function buildCopilotChatPrompt({
   deliveryEstimateContext,
   providerTrackingContext,
   approvedMemories = [],
-  issueContext
+  issueContext,
+  attachmentAnalysis,
+  caseReview
 }) {
   const normalizedChatMessages = normalizeChatMessages(chatMessages);
   const baseResponseLanguage = responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext });
@@ -144,6 +158,8 @@ export function buildCopilotChatPrompt({
   const deliveryTimingGuidance = JSON.stringify(buildDeliveryTimingGuidance(deliveryEstimateContext), null, 2);
   const providerTrackingSummary = JSON.stringify(providerTrackingContext || null, null, 2);
   const issueContextSummary = JSON.stringify(issueContext || null, null, 2);
+  const attachmentAnalysisSummary = JSON.stringify(attachmentAnalysis || null, null, 2);
+  const caseReviewSummary = JSON.stringify(caseReview || null, null, 2);
   const shopifySummary = JSON.stringify(buildShopifyPromptSummary(shopifyContext), null, 2);
 
   const agentChatLanguage = inferAgentChatLanguage(normalizedChatMessages);
@@ -184,6 +200,8 @@ export function buildCopilotChatPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
+      caseReviewInstruction(),
+      attachmentEvidenceInstruction(),
       providerTrackingInstruction(),
       customsPendingInstruction(),
       deliveryEstimateInstruction(),
@@ -220,6 +238,9 @@ export function buildCopilotChatPrompt({
       'Support case:',
       supportCaseSummary,
       '',
+      'Case review:',
+      caseReviewSummary,
+      '',
       'Customs context:',
       customsContext,
       '',
@@ -234,6 +255,9 @@ export function buildCopilotChatPrompt({
       '',
       'Open ticket context:',
       issueContextSummary,
+      '',
+      'Attachment image analysis:',
+      attachmentAnalysisSummary,
       '',
       'Shopify context:',
       shopifySummary,
@@ -301,6 +325,29 @@ function linkInstruction() {
     'If you mention privacy, personal data, data protection, GDPR, or customer data rights, include https://kitsrepublic.com/policies/privacy-policy once.',
     'If you mention FAQ, Help Center, general help documentation, or questions not covered by a specific policy link, include https://kitsrepublic.com/pages/faq-help-center once.',
     'Format links as a label line, a blank line, then the URL. Never write Label:https://...'
+  ].join(' ');
+}
+
+function caseReviewInstruction() {
+  return [
+    'Case review rule:',
+    'Case review is an internal pre-send checklist built from Chatwoot, Shopify, provider tracking, open issue context, image analysis, and duplicate checks.',
+    'Use case_review.summary, verified_facts, missing_info, recommended_decision, and after_send_action to decide what the draft should do.',
+    'Do not put case_review labels, internal actions, after_send_action, or missing_info lists into the customer draft.',
+    'If case_review.missing_info contains a fact required to answer safely, ask the customer or tell the agent in assistant_message instead of inventing it.',
+    'If case_review.after_send_action is wait_supplier, do not promise a replacement, refund, or resend unless agent_confirmed_facts or the agent instruction says it is already approved.'
+  ].join(' ');
+}
+
+function attachmentEvidenceInstruction() {
+  return [
+    'Attachment image analysis rule:',
+    'Attachment image analysis is internal evidence extracted from customer images and screenshots.',
+    'Use it to identify visible tracking numbers, carrier status, proof of delivery, shirt details, size labels, customization, damage, or mismatch signals.',
+    'Do not claim image details as certain when analysis confidence is low or wording says unclear.',
+    'Do not mention internal image analysis, OCR, model analysis, or attachment IDs to the customer.',
+    'If image evidence supports the customer report, acknowledge it naturally and apologize when appropriate.',
+    'If image evidence is missing or unavailable for wrong item, product mismatch, damage, or size-label claims, ask for clear photos instead of assuming the claim is verified.'
   ].join(' ');
 }
 

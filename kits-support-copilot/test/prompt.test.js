@@ -77,6 +77,31 @@ test('builds iterative chat prompt with current draft and chat history', () => {
       confidence: 'medium',
       reasons: ['tracking_present', 'local_handoff_carrier:Royal Mail']
     },
+    caseReview: {
+      summary: 'Customer asks where the order is.',
+      detected_case: 'customs_pending',
+      verified_facts: ['Tracking number: 0141605773793172.'],
+      missing_info: [],
+      recommended_decision: 'Explain customs status and include the canonical tracking link.',
+      after_send_action: 'leave_open',
+      confidence: 'medium'
+    },
+    attachmentAnalysis: {
+      available: true,
+      source: 'openai_vision',
+      reason: 'analyzed',
+      analyses: [
+        {
+          id: 'att-1',
+          evidence_type: 'tracking',
+          summary: 'Royal Mail screenshot says pending receipt.',
+          visible_text: ['Royal Mail', 'Pending'],
+          signals: ['carrier_status'],
+          confidence: 'high'
+        }
+      ],
+      warnings: []
+    },
     currentDraft: 'Current draft',
     chatMessages: [
       { role: 'user', content: 'make it shorter' },
@@ -117,6 +142,8 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /Never invent completed operational actions/);
   assert.match(prompt.system, /Agent chat messages are trusted operational context/);
   assert.match(prompt.system, /Use one customer-facing link per topic and never duplicate links/);
+  assert.match(prompt.system, /Case review rule/);
+  assert.match(prompt.system, /Attachment image analysis rule/);
   assert.match(prompt.system, /Provider tracking context is internal tracking data/);
   assert.match(prompt.system, /customs_status is customs_clearance_completed, do not say the shipment is still in customs clearance/);
   assert.match(prompt.system, /Never mention provider portal URLs, IP addresses/);
@@ -133,6 +160,10 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.user, /No matching Shopify order was found/);
   assert.match(prompt.user, /Support case/);
   assert.match(prompt.user, /customs_pending/);
+  assert.match(prompt.user, /Case review/);
+  assert.match(prompt.user, /recommended_decision/);
+  assert.match(prompt.user, /Attachment image analysis/);
+  assert.match(prompt.user, /Royal Mail screenshot says pending receipt/);
   assert.match(prompt.user, /Customs context/);
   assert.match(prompt.user, /Delivery estimate context/);
   assert.match(prompt.user, /Provider tracking context/);

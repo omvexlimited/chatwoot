@@ -21,6 +21,9 @@ import { detectSupportCase } from './support-case.js';
 import { enforceDraftRequirements } from './draft-rules.js';
 import { buildPublicTrackingUrl } from './tracking-url.js';
 import { extractAgentConfirmedFacts } from './agent-facts.js';
+import { extractAttachmentCandidates } from './attachment-candidates.js';
+import { analyzeAttachmentCandidates } from './attachment-analysis.js';
+import { buildCaseReview, withCaseReviewDraft } from './case-review.js';
 import {
   ensureMemoryTable,
   formatPromptMemories,
@@ -200,7 +203,9 @@ async function handleSuggestReply(req, res) {
     supportCase: context.supportCase,
     deliveryEstimateContext: context.deliveryEstimateContext,
     providerTrackingContext: context.providerTrackingContext,
-    issueContext: context.issueContext
+    issueContext: context.issueContext,
+    attachmentAnalysis: context.attachmentAnalysis,
+    caseReview: context.caseReview
   });
 
   const result = await generateDraftWithOpenAI({ config, prompt, fallback });
@@ -220,6 +225,10 @@ async function handleSuggestReply(req, res) {
     provider_context: context.providerContext,
     provider_tracking_context: context.providerTrackingContext,
     issue_context: context.issueContext,
+    attachment_candidates: context.attachmentCandidates,
+    attachment_analysis: context.attachmentAnalysis,
+    duplicate_context: context.duplicateContext,
+    case_review: withCaseReviewDraft(context.caseReview, draft),
     context_summary: summarizeContext(context),
     contact_email: context.contactEmail,
     response_language: context.responseLanguage,
@@ -376,7 +385,9 @@ async function handleCopilotChat(req, res) {
     deliveryEstimateContext: context.deliveryEstimateContext,
     providerTrackingContext: context.providerTrackingContext,
     approvedMemories: memoryResult.memories,
-    issueContext: context.issueContext
+    issueContext: context.issueContext,
+    attachmentAnalysis: context.attachmentAnalysis,
+    caseReview: context.caseReview
   });
 
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
@@ -528,6 +539,10 @@ function sendCopilotChatResponse(res, {
     provider_context: context.providerContext,
     provider_tracking_context: context.providerTrackingContext,
     issue_context: context.issueContext,
+    attachment_candidates: context.attachmentCandidates,
+    attachment_analysis: context.attachmentAnalysis,
+    duplicate_context: context.duplicateContext,
+    case_review: withCaseReviewDraft(context.caseReview, draft),
     context_summary: summarizeContext(responseContext),
     contact_email: context.contactEmail,
     response_language: responseContext.responseLanguage,
@@ -570,6 +585,7 @@ async function prepareConversationContext(body) {
   }));
 
   const messages = chatwootResult.messages.length ? chatwootResult.messages : fallbackMessages;
+  const attachmentCandidates = extractAttachmentCandidates(messages);
   const fallbackLatestMessage = prependSubjectToText(body.latest_message || '', body.latest_subject || '');
   const chatwootLatestMessage = latestIncomingMessage(messages);
   const latestMessage = chatwootLatestMessage
@@ -641,16 +657,62 @@ async function prepareConversationContext(body) {
     warnings: [`Issue lookup failed: ${error.message}`]
   }));
 
+  const attachmentAnalysis = await analyzeAttachmentCandidates({
+    config,
+    attachments: attachmentCandidates
+  }).catch(error => ({
+    available: false,
+    source: null,
+    reason: 'lookup_failed',
+    analyzed_count: 0,
+    analyses: [],
+    warnings: [`Attachment analysis failed: ${error.message}`]
+  }));
+
+  const duplicateContext = await getDuplicateContext({
+    body,
+    accountId,
+    conversationId,
+    contactEmail,
+    shopifyContext
+  }).catch(error => ({
+    available: false,
+    source: null,
+    reason: 'lookup_failed',
+    possible_duplicates: [],
+    confirmed_duplicate: false,
+    warnings: [`Duplicate lookup failed: ${error.message}`]
+  }));
+
   const warnings = uniqueStrings([
     ...(chatwootResult.warnings || []),
     ...(shopifyContext.warnings || []),
     ...(providerContext.warnings || []),
     ...(providerTrackingContext?.warnings || []),
     ...(deliveryEstimateContext?.warnings || []),
-    ...(issueContext?.warnings || [])
+    ...(issueContext?.warnings || []),
+    ...(attachmentAnalysis?.warnings || []),
+    ...(duplicateContext?.warnings || [])
   ]);
   const responseLanguage = inferResponseLanguage({ latestMessage, shopifyContext });
-  const supportCase = detectSupportCase({ latestMessage, conversationText, shopifyContext });
+  const supportCase = detectSupportCase({
+    latestMessage,
+    conversationText,
+    shopifyContext,
+    providerTrackingContext,
+    issueContext,
+    attachmentAnalysis,
+    duplicateContext
+  });
+  const caseReview = buildCaseReview({
+    supportCase,
+    latestMessage,
+    shopifyContext,
+    providerTrackingContext,
+    issueContext,
+    attachmentAnalysis,
+    duplicateContext
+  });
 
   return {
     accountId,
@@ -661,16 +723,118 @@ async function prepareConversationContext(body) {
     latestMessage,
     conversationText,
     messageCount: messages.length,
+    attachmentCandidates,
     chatwootAvailable: Boolean(chatwootResult.available),
     shopifyContext,
     providerContext,
     providerTrackingContext,
     deliveryEstimateContext,
     issueContext,
+    attachmentAnalysis,
+    duplicateContext,
     responseLanguage,
     supportCase,
+    caseReview,
     warnings
   };
+}
+
+async function getDuplicateContext({ body, accountId, conversationId, contactEmail, shopifyContext }) {
+  const provided = normalizeProvidedDuplicateContext(body.duplicate_context);
+  if (provided) return provided;
+
+  if (!config.chatwootBaseUrl || !config.chatwootApiToken || !accountId || !contactEmail) {
+    return {
+      available: false,
+      source: null,
+      reason: 'not_configured_or_missing_contact',
+      possible_duplicates: [],
+      confirmed_duplicate: false,
+      warnings: []
+    };
+  }
+
+  const data = await listConversations({ config, accountId, status: 'open', page: 1 });
+  const selectedOrderRef = shopifyContext?.selected_order?.name || '';
+  const trackingNumbers = trackingNumbersFromOrder(shopifyContext?.selected_order);
+  const possible = extractConversationList(data)
+    .map(conversation => normalizeConversationDuplicateCandidate({
+      conversation,
+      currentConversationId: conversationId,
+      contactEmail,
+      selectedOrderRef,
+      trackingNumbers
+    }))
+    .filter(Boolean)
+    .slice(0, 5);
+
+  return {
+    available: true,
+    source: 'chatwoot_conversations',
+    reason: possible.length ? 'possible_related_conversations' : 'no_related_conversations_found',
+    possible_duplicates: possible,
+    confirmed_duplicate: false,
+    warnings: []
+  };
+}
+
+function normalizeProvidedDuplicateContext(value) {
+  if (!value || typeof value !== 'object') return null;
+  const possible = Array.isArray(value.possible_duplicates)
+    ? value.possible_duplicates.map(item => ({
+      conversation_id: String(item.conversation_id || item.id || '').trim(),
+      status: String(item.status || '').trim(),
+      match_reasons: Array.isArray(item.match_reasons) ? item.match_reasons.map(String).filter(Boolean) : []
+    })).filter(item => item.conversation_id)
+    : [];
+  return {
+    available: Boolean(value.available ?? true),
+    source: String(value.source || 'provided').trim(),
+    reason: String(value.reason || '').trim() || (possible.length ? 'provided_duplicates' : 'provided_empty'),
+    possible_duplicates: possible,
+    confirmed_duplicate: Boolean(value.confirmed_duplicate),
+    warnings: Array.isArray(value.warnings) ? value.warnings.map(String).filter(Boolean) : []
+  };
+}
+
+function normalizeConversationDuplicateCandidate({
+  conversation,
+  currentConversationId,
+  contactEmail,
+  selectedOrderRef,
+  trackingNumbers
+}) {
+  const id = String(conversation.display_id || conversation.id || '').trim();
+  if (!id || id === String(currentConversationId || '')) return null;
+
+  const sender = conversation.meta?.sender || conversation.contact || conversation.sender || {};
+  const email = String(sender.email || conversation.contact_email || '').trim().toLowerCase();
+  const matchReasons = [];
+  if (email && email === String(contactEmail || '').trim().toLowerCase()) matchReasons.push('same_contact_email');
+
+  const haystack = JSON.stringify(conversation).toLowerCase();
+  if (selectedOrderRef && haystack.includes(String(selectedOrderRef).toLowerCase())) matchReasons.push('same_order_ref');
+  for (const trackingNumber of trackingNumbers) {
+    if (trackingNumber && haystack.includes(trackingNumber.toLowerCase())) matchReasons.push('same_tracking_number');
+  }
+
+  if (!matchReasons.length) return null;
+  return {
+    conversation_id: id,
+    status: String(conversation.status || '').trim(),
+    assignee: conversation.assignee?.name || conversation.assignee?.email || null,
+    last_activity_at: conversation.last_activity_at || null,
+    match_reasons: matchReasons
+  };
+}
+
+function trackingNumbersFromOrder(order = {}) {
+  const fulfillments = Array.isArray(order?.fulfillments) ? order.fulfillments : [];
+  return uniqueStrings(fulfillments.flatMap(fulfillment => {
+    const numbers = Array.isArray(fulfillment.tracking_numbers) ? fulfillment.tracking_numbers : [];
+    const tracking = Array.isArray(fulfillment.tracking) ? fulfillment.tracking.map(item => item?.number) : [];
+    return [...numbers, ...tracking].map(item => String(item || '').trim()).filter(Boolean);
+  }));
 }
 
 async function generatePreparedDraftForJob(row) {
@@ -795,7 +959,9 @@ function buildPreparedDraftPrompt({ context, approvedMemories = [] }) {
     supportCase: context.supportCase,
     deliveryEstimateContext: context.deliveryEstimateContext,
     providerTrackingContext: context.providerTrackingContext,
-    issueContext: context.issueContext
+    issueContext: context.issueContext,
+    attachmentAnalysis: context.attachmentAnalysis,
+    caseReview: context.caseReview
   });
 
   return {
@@ -879,6 +1045,10 @@ function contextPayload(context) {
     provider_tracking_context: context.providerTrackingContext,
     delivery_estimate_context: context.deliveryEstimateContext,
     issue_context: context.issueContext,
+    attachment_candidates: summarizeAttachmentCandidates(context.attachmentCandidates),
+    attachment_analysis: context.attachmentAnalysis,
+    duplicate_context: context.duplicateContext,
+    case_review: context.caseReview,
     shopify_context: context.shopifyContext,
     context_summary: summarizeContext(context),
     warnings: context.warnings
@@ -897,6 +1067,10 @@ function summarizeContext(context) {
       provider_tracking_context: null,
       delivery_estimate_context: null,
       issue_context: context.issueContext,
+      attachment_candidates: summarizeAttachmentCandidates(context.attachmentCandidates),
+      attachment_analysis: context.attachmentAnalysis,
+      duplicate_context: context.duplicateContext,
+      case_review: context.caseReview,
       response_language: context.responseLanguage,
       support_case: context.supportCase
     };
@@ -928,6 +1102,10 @@ function summarizeContext(context) {
     provider_tracking_context: context.providerTrackingContext,
     delivery_estimate_context: context.deliveryEstimateContext,
     issue_context: context.issueContext,
+    attachment_candidates: summarizeAttachmentCandidates(context.attachmentCandidates),
+    attachment_analysis: context.attachmentAnalysis,
+    duplicate_context: context.duplicateContext,
+    case_review: context.caseReview,
     shipping_country: order.shipping_address?.country || null,
     shipping_country_code: order.shipping_address?.country_code || null,
     response_language: context.responseLanguage,
@@ -944,6 +1122,19 @@ function summarizeLineItems(lineItems = []) {
     sku: item.sku || null,
     fulfillment_status: item.fulfillment_status || null,
     custom_attributes: summarizeCustomAttributes(item.custom_attributes)
+  }));
+}
+
+function summarizeAttachmentCandidates(attachments = []) {
+  return (Array.isArray(attachments) ? attachments : []).slice(0, 5).map(attachment => ({
+    id: attachment.id || null,
+    filename: attachment.filename || null,
+    content_type: attachment.content_type || null,
+    file_size: attachment.file_size || null,
+    width: attachment.width || null,
+    height: attachment.height || null,
+    message_id: attachment.message_id || null,
+    created_at: attachment.created_at || null
   }));
 }
 

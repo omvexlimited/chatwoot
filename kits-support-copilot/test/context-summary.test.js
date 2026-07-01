@@ -223,6 +223,37 @@ test('builds order candidate card for multiple Shopify orders', () => {
   assert.equal(orders.emphasis, false);
 });
 
+test('shows case review and image analysis cards when available', () => {
+  const view = buildContextView(contextResult({
+    caseReview: {
+      summary: 'Customer says delivered parcel was not received.',
+      detected_case: 'delivered_not_found',
+      recommended_decision: 'Ask customer to check safe places and wait for delivery proof.',
+      after_send_action: 'wait_customer',
+      missing_info: ['Delivery proof not yet confirmed.']
+    },
+    attachmentAnalysis: {
+      available: true,
+      analyses: [
+        {
+          evidence_type: 'delivery_proof',
+          summary: 'Royal Mail proof of delivery screenshot.',
+          visible_text: ['Delivered', 'GV499951597GB']
+        }
+      ]
+    }
+  }));
+
+  const review = view.cards.find(card => card.title === 'Review');
+  const images = view.cards.find(card => card.title === 'Images');
+
+  assert.equal(review.emphasis, true);
+  assert.match(review.rows.find(row => row.label === 'Decision').value, /safe places/);
+  assert.match(images.rows[0].value, /GV499951597GB/);
+  assert.equal(view.rawPayload.case_review.detected_case, 'delivered_not_found');
+  assert.equal(view.rawPayload.attachment_analysis.available, true);
+});
+
 function contextResult({
   trackingNumber = 'KR123',
   trackingUrl = 'https://tracking.example.test',
@@ -237,7 +268,9 @@ function contextResult({
     order_ref: '#1421',
     total: 0,
     issues: []
-  }
+  },
+  caseReview = null,
+  attachmentAnalysis = null
 } = {}) {
   return {
     contact_email: 'customer@example.com',
@@ -283,12 +316,16 @@ function contextResult({
       provider_tracking_context: providerTracking,
       delivery_estimate_context: deliveryEstimate,
       issue_context: issueContext,
+      case_review: caseReview,
+      attachment_analysis: attachmentAnalysis,
       shipping_country: 'Spain',
       shipping_country_code: 'ES',
       order_candidates: orderCandidates
     },
     provider_tracking_context: providerTracking,
     issue_context: issueContext,
+    case_review: caseReview,
+    attachment_analysis: attachmentAnalysis,
     shopify_context: {
       selected_order: {
         name: '#1421',

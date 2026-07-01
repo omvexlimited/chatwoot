@@ -84,10 +84,22 @@ function normalizeIssues(issues = []) {
     issue_type: String(issue.issue_type || 'other').trim(),
     status: String(issue.status || '').trim(),
     message_preview: String(issue.message_preview || issue.message || '').trim().slice(0, 240),
+    affected_items: normalizeAffectedItems(issue.affected_items || issue.affected_line_items || issue.line_items),
     created_at: issue.created_at || null,
     updated_at: issue.updated_at || null,
     url: safeHttpUrl(issue.url)
   })).filter(issue => issue.issue_id);
+}
+
+function normalizeAffectedItems(items = []) {
+  if (!Array.isArray(items)) return [];
+  return items.slice(0, 10).map(item => ({
+    id: String(item.id || item.line_item_id || item.shopify_line_item_id || '').trim() || null,
+    name: String(item.name || item.title || item.product_title || '').trim(),
+    sku: String(item.sku || '').trim(),
+    variant_title: String(item.variant_title || item.variant || item.size || '').trim(),
+    quantity: normalizeNumber(item.quantity)
+  })).filter(item => item.id || item.name || item.sku || item.variant_title);
 }
 
 function normalizeIssueId(value) {
@@ -102,6 +114,11 @@ function normalizeOrderRef(value = '') {
 
 function normalizeWarnings(warnings = []) {
   return Array.isArray(warnings) ? warnings.map(String).filter(Boolean) : [];
+}
+
+function normalizeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function safeHttpUrl(value) {

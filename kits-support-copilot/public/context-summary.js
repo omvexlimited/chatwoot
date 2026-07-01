@@ -18,6 +18,8 @@ export function buildContextView(result = {}) {
   const deliveryEstimate = result.delivery_estimate_context || summary.delivery_estimate_context || null;
   const providerTracking = result.provider_tracking_context || summary.provider_tracking_context || null;
   const issueContext = result.issue_context || summary.issue_context || null;
+  const caseReview = result.case_review || summary.case_review || null;
+  const attachmentAnalysis = result.attachment_analysis || summary.attachment_analysis || null;
   const orderCandidates = normalizeOrderCandidates(summary.order_candidates);
   const lineItems = normalizeLineItems(summary.line_items || order?.line_items);
 
@@ -37,6 +39,8 @@ export function buildContextView(result = {}) {
       ordersCard(orderCandidates),
       trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate, providerTracking }),
       caseCard(supportCase),
+      caseReviewCard(caseReview),
+      attachmentAnalysisCard(attachmentAnalysis),
       warningsCard(warnings)
     ].filter(Boolean),
     rawPayload: {
@@ -45,6 +49,8 @@ export function buildContextView(result = {}) {
       provider_tracking_context: providerTracking,
       delivery_estimate_context: deliveryEstimate,
       issue_context: issueContext,
+      case_review: caseReview,
+      attachment_analysis: attachmentAnalysis,
       warnings,
       shopify_context: shopify
     }
@@ -214,6 +220,37 @@ function caseCard(supportCase) {
       { label: 'Reasons', value: formatReasons(supportCase?.reasons) }
     ],
     emphasis: Boolean(supportCase?.type)
+  };
+}
+
+function caseReviewCard(caseReview) {
+  if (!caseReview) return null;
+  return {
+    title: 'Review',
+    rows: [
+      { label: 'Summary', value: caseReview.summary || '-' },
+      { label: 'Decision', value: caseReview.recommended_decision || '-' },
+      { label: 'After send', value: caseReview.after_send_action || '-' },
+      { label: 'Missing', value: formatReasons(caseReview.missing_info) || '-' }
+    ],
+    emphasis: Boolean(caseReview.detected_case && caseReview.detected_case !== 'other')
+  };
+}
+
+function attachmentAnalysisCard(attachmentAnalysis) {
+  const analyses = Array.isArray(attachmentAnalysis?.analyses) ? attachmentAnalysis.analyses : [];
+  if (!analyses.length) return null;
+  return {
+    title: 'Images',
+    rows: analyses.slice(0, 3).map((analysis, index) => ({
+      label: `Image ${index + 1}`,
+      value: [
+        analysis.evidence_type,
+        analysis.summary,
+        Array.isArray(analysis.visible_text) && analysis.visible_text.length ? `Text: ${analysis.visible_text.join(' | ')}` : ''
+      ].filter(Boolean).join(' - ') || '-'
+    })),
+    emphasis: true
   };
 }
 

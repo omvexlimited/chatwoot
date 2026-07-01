@@ -17,6 +17,15 @@ test('loads open issues for selected order from internal admin API', async t => 
           issue_type: 'shipping',
           status: 'open',
           message_preview: 'Supplier needs to confirm handoff.',
+          affected_items: [
+            {
+              id: 'gid://shopify/LineItem/111',
+              name: 'France 1998 Away Shirt - XL',
+              sku: 'KR-fra:1998-away-XL',
+              variant_title: 'XL',
+              quantity: 1
+            }
+          ],
           created_at: '2026-06-12T10:00:00Z',
           updated_at: '2026-06-12T11:00:00Z',
           url: 'https://admin.example.com/kits-republic/issues/22'
@@ -39,6 +48,15 @@ test('loads open issues for selected order from internal admin API', async t => 
   assert.equal(result.reason, 'open_issues_found');
   assert.equal(result.issues[0].issue_id, 22);
   assert.equal(result.issues[0].url, 'https://admin.example.com/kits-republic/issues/22');
+  assert.deepEqual(result.issues[0].affected_items, [
+    {
+      id: 'gid://shopify/LineItem/111',
+      name: 'France 1998 Away Shirt - XL',
+      sku: 'KR-fra:1998-away-XL',
+      variant_title: 'XL',
+      quantity: 1
+    }
+  ]);
 });
 
 test('returns warning when internal issue lookup is not configured', async () => {

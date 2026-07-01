@@ -537,6 +537,7 @@ function pruneMemoryRows(maxRows = 250) {
 }
 
 function inferDetectedCase(context = {}) {
+  if (context.caseReview?.detected_case) return context.caseReview.detected_case;
   if (context.supportCase?.type) return context.supportCase.type;
 
   const text = `${context.latestMessage || ''}\n${context.conversationText || ''}`.toLowerCase();
@@ -564,6 +565,23 @@ function actionChecklistForCase({ detectedCase, context }) {
   const status = String(order?.fulfillment_status || '').toUpperCase();
   const sent = status === 'FULFILLED' || order?.fulfillments?.some(hasTracking);
   const sizeChange = extractSizeChange(`${context.latestMessage || ''}\n${context.conversationText || ''}`);
+  const afterSendAction = context.caseReview?.after_send_action;
+
+  if (afterSendAction === 'wait_supplier') {
+    return [
+      'Revisa el ticket/incidencia interna y espera confirmación del supplier/provider antes de prometer una solución definitiva.'
+    ];
+  }
+  if (afterSendAction === 'mark_duplicate') {
+    return [
+      'Comprueba el hilo principal antes de enviar. Evita responder dos veces con información distinta y marca/cierra el duplicado si corresponde.'
+    ];
+  }
+  if (afterSendAction === 'wait_customer') {
+    return [
+      'Deja el caso abierto después de responder porque necesitamos confirmación o información adicional del cliente.'
+    ];
+  }
 
   if (!order && ['size_change_request', 'address_change_request', 'refund_or_cancel_request'].includes(detectedCase)) {
     return ['Busca o selecciona el pedido antes de confirmar cualquier cambio al cliente.'];
