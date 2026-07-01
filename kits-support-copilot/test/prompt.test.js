@@ -181,6 +181,40 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.user, /Royal Mail does not recognise the tracking number yet/);
 });
 
+test('builds chat prompt for internal agent questions without draft regeneration', () => {
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Published Playbook Index\nDecision Tree\nReturns And Refunds General',
+    conversationText: 'INCOMING Customer: I want a refund for orders #2605 and #2609.',
+    shopifyContext: {
+      selected_order: {
+        name: '#2605',
+        financial_status: 'paid',
+        fulfillment_status: 'fulfilled'
+      },
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'I want a refund for orders #2605 and #2609.',
+    agentEmail: 'agent@example.com',
+    currentDraft: 'Existing customer draft',
+    chatMessages: [
+      { role: 'user', content: 'quiere refund de las 2 orders?' }
+    ],
+    interactionMode: 'agent_question'
+  });
+
+  assert.match(prompt.system, /INTERACTION_MODE: agent_question/);
+  assert.match(prompt.system, /internal question or clarification request/);
+  assert.match(prompt.system, /Answer the agent question directly/);
+  assert.match(prompt.system, /Do not start with "Borrador preparado"/);
+  assert.match(prompt.system, /Set agent_briefing to null/);
+  assert.match(prompt.system, /draft to the exact Current draft text/);
+  assert.doesNotMatch(prompt.system, /agent_briefing as a JSON object in Spanish/);
+  assert.match(prompt.user, /INTERACTION_MODE: agent_question/);
+  assert.match(prompt.user, /Existing customer draft/);
+  assert.match(prompt.user, /draft must remain exactly the same as Current draft/);
+});
+
 test('passes provider tracking context to prompt as logistics source', () => {
   const prompt = buildCopilotChatPrompt({
     knowledgeBase: 'Guide text',

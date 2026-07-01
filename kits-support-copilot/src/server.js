@@ -25,6 +25,7 @@ import { extractAttachmentCandidates } from './attachment-candidates.js';
 import { analyzeAttachmentCandidates } from './attachment-analysis.js';
 import { buildCaseReview, withCaseReviewDraft } from './case-review.js';
 import { createPlaybookKnowledgeProvider } from './playbook-knowledge.js';
+import { isAgentQuestionOnly } from './agent-intent.js';
 import {
   ensureMemoryTable,
   formatPromptMemories,
@@ -259,6 +260,7 @@ async function handleCopilotChat(req, res) {
   const command = latestUserCommand(chatMessages);
   const pendingIssue = normalizePendingIssue(body.pending_issue);
   const latestUserMessage = latestUserChatMessage(chatMessages);
+  const agentQuestionOnly = isAgentQuestionOnly(latestUserMessage);
   const ticketResult = await runNewTicketCommand({
     command,
     config,
@@ -373,16 +375,25 @@ async function handleCopilotChat(req, res) {
     }
   });
 
-  const fallback = {
-    assistant_message: formatAgentBriefingForChat(fallbackBriefing),
-    draft: currentDraft || fallbackDraft.draft,
-    agent_briefing: fallbackBriefing,
-    reasoning_summary: currentDraft
-      ? 'OpenAI was unavailable, so the existing draft was preserved.'
-      : fallbackDraft.reasoning_summary,
-    confidence: currentDraft ? 'low' : fallbackDraft.confidence,
-    warnings: fallbackDraft.warnings
-  };
+  const fallback = agentQuestionOnly
+    ? {
+      assistant_message: 'No puedo responder esa pregunta interna ahora mismo porque OpenAI no está disponible. Conservé el borrador actual sin cambios.',
+      draft: currentDraft,
+      agent_briefing: null,
+      reasoning_summary: 'OpenAI was unavailable, so the internal agent question could not be answered and the draft was preserved.',
+      confidence: 'low',
+      warnings: fallbackDraft.warnings
+    }
+    : {
+      assistant_message: formatAgentBriefingForChat(fallbackBriefing),
+      draft: currentDraft || fallbackDraft.draft,
+      agent_briefing: fallbackBriefing,
+      reasoning_summary: currentDraft
+        ? 'OpenAI was unavailable, so the existing draft was preserved.'
+        : fallbackDraft.reasoning_summary,
+      confidence: currentDraft ? 'low' : fallbackDraft.confidence,
+      warnings: fallbackDraft.warnings
+    };
 
   const prompt = buildCopilotChatPrompt({
     knowledgeBase: knowledge.markdown,
@@ -400,10 +411,35 @@ async function handleCopilotChat(req, res) {
     approvedMemories: memoryResult.memories,
     issueContext: context.issueContext,
     attachmentAnalysis: context.attachmentAnalysis,
-    caseReview: context.caseReview
+    caseReview: context.caseReview,
+    interactionMode: agentQuestionOnly ? 'agent_question' : 'draft'
   });
 
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
+  if (agentQuestionOnly) {
+    const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...(knowledge.warnings || [])]);
+    const assistantMessage = normalizeAssistantMessage({
+      assistantMessage: result.assistant_message || fallback.assistant_message,
+      agentConfirmedFacts,
+      chatMessages
+    });
+
+    return sendCopilotChatResponse(res, {
+      context,
+      responseContext,
+      assistantMessage,
+      draft: currentDraft,
+      reasoningSummary: result.reasoning_summary,
+      confidence: result.confidence,
+      warnings,
+      agentConfirmedFacts,
+      approvedMemories: memoryResult.memories,
+      preserveDraft: true,
+      skipInsert: true,
+      agentBriefing: null
+    });
+  }
+
   const draft = enforceDraftRequirements({
     draft: result.draft,
     supportCase: context.supportCase,
