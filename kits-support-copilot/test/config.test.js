@@ -122,10 +122,12 @@ test('supports Chatwoot webhook secret', () => {
 test('supports Kits admin base URL override', () => {
   const config = loadConfig({
     KITS_ADMIN_BASE_URL: 'https://admin.example.test/',
-    KITS_INTERNAL_API_TOKEN: 'secret'
+    KITS_INTERNAL_API_TOKEN: 'secret',
+    KR_PLAYBOOK_KNOWLEDGE_CACHE_MS: '30000'
   });
 
   assert.equal(config.kitsAdminBaseUrl, 'https://admin.example.test');
   assert.equal(config.kitsInternalApiToken, 'secret');
+  assert.equal(config.playbookKnowledgeCacheMs, 30000);
   assert.equal(getConfigStatus(config).kits_internal_api, true);
 });

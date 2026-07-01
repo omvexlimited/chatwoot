@@ -24,6 +24,7 @@ import { extractAgentConfirmedFacts } from './agent-facts.js';
 import { extractAttachmentCandidates } from './attachment-candidates.js';
 import { analyzeAttachmentCandidates } from './attachment-analysis.js';
 import { buildCaseReview, withCaseReviewDraft } from './case-review.js';
+import { createPlaybookKnowledgeProvider } from './playbook-knowledge.js';
 import {
   ensureMemoryTable,
   formatPromptMemories,
@@ -64,7 +65,8 @@ import { generateChatWithOpenAI, generateDraftWithOpenAI } from './openai.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, '..', 'public');
 const config = loadConfig();
-const knowledgeBase = await loadKnowledgeBase();
+const fallbackKnowledgeBase = await loadKnowledgeBase();
+const getKnowledgeBase = createPlaybookKnowledgeProvider({ config, fallbackKnowledgeBase });
 await ensureMemoryTable({ config }).catch(error => {
   console.warn(`KR Copilot memory disabled: ${error.message}`);
 });
@@ -193,6 +195,7 @@ async function handleSuggestReply(req, res) {
   });
   fallback.warnings.push(...context.warnings);
 
+  const knowledgeBase = await getKnowledgeBase();
   const prompt = buildPrompt({
     knowledgeBase,
     conversationText: context.conversationText,
@@ -371,6 +374,7 @@ async function handleCopilotChat(req, res) {
     warnings: fallbackDraft.warnings
   };
 
+  const knowledgeBase = await getKnowledgeBase();
   const prompt = buildCopilotChatPrompt({
     knowledgeBase,
     conversationText: context.conversationText,
@@ -865,9 +869,11 @@ async function generatePreparedDraftForJob(row) {
     confidence: fallbackDraft.confidence,
     warnings: fallbackDraft.warnings
   };
+  const knowledgeBase = await getKnowledgeBase();
   const prompt = buildPreparedDraftPrompt({
     context,
-    approvedMemories: memoryResult.memories
+    approvedMemories: memoryResult.memories,
+    knowledgeBase
   });
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
   const draft = enforceDraftRequirements({
@@ -948,7 +954,7 @@ async function writePreparedDraftToChatwoot({ row, draft }) {
   }
 }
 
-function buildPreparedDraftPrompt({ context, approvedMemories = [] }) {
+function buildPreparedDraftPrompt({ context, approvedMemories = [], knowledgeBase }) {
   const prompt = buildPrompt({
     knowledgeBase,
     conversationText: context.conversationText,

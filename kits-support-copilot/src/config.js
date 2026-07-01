@@ -35,6 +35,7 @@ export function loadConfig(env = process.env) {
     krProviderStoreId: envValue(env, ['KR_PROVIDER_STORE_ID'], 'kits_republic'),
     krProviderDatabaseSsl: envValue(env, ['KITS_REPUBLIC_DATABASE_SSL', 'KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
     kitsInternalApiToken: envValue(env, ['KITS_INTERNAL_API_TOKEN']),
+    playbookKnowledgeCacheMs: Number(envValue(env, ['KR_PLAYBOOK_KNOWLEDGE_CACHE_MS'], '60000')),
     chatwootBaseUrl,
     chatwootAccountId: envValue(env, ['CHATWOOT_ACCOUNT_ID']),
     chatwootApiToken: envValue(env, ['CHATWOOT_API_TOKEN']),
