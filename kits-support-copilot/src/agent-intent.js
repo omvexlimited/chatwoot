@@ -36,8 +36,8 @@ export function classifyAgentIntent(value = '') {
   if (isBriefCommand(text)) return 'brief_command';
   if (/^generate a reply for this customer\.?$/i.test(text)) return 'initial_brief';
   if (text.startsWith('/')) return 'utility_command';
-  if (DRAFT_INTENT_PATTERNS.some(pattern => pattern.test(text))) return 'draft_command';
   if (isQuestionOnlyText(text)) return 'agent_question';
+  if (DRAFT_INTENT_PATTERNS.some(pattern => pattern.test(text))) return 'draft_command';
   return 'draft_command';
 }
 
@@ -73,6 +73,10 @@ function isQuestionOnlyText(text) {
   }
 
   if (/\b(what should i say|what do i tell|qué le digo|que le digo|qué le respondo|que le respondo)\b/i.test(text)) {
+    return false;
+  }
+
+  if (/\b(puedes|puedo|can you|could you|please)\b.*\b(escrib\w*|redact\w*|responde\w*|responder\w*|contesta\w*|reply\w*|respond\w*|write\w*|draft\w*)\b/i.test(text)) {
     return false;
   }
 

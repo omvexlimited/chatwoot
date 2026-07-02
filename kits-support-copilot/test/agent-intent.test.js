@@ -22,6 +22,7 @@ test('does not classify draft commands as internal questions', () => {
   assert.equal(isAgentQuestionOnly('aprobado'), false);
   assert.equal(isAgentQuestionOnly('Generate a reply for this customer.'), false);
   assert.equal(isAgentQuestionOnly('qué le respondo?'), false);
+  assert.equal(isAgentQuestionOnly('puedes escribirle en inglés?'), false);
 });
 
 test('classifies copilot interaction modes deterministically', () => {
@@ -33,6 +34,22 @@ test('classifies copilot interaction modes deterministically', () => {
   assert.equal(classifyAgentIntent('qué le respondo?'), 'draft_command');
   assert.equal(classifyAgentIntent('quiere refund de las 2 orders?'), 'agent_question');
   assert.equal(classifyAgentIntent('hay riesgo de chargeback?'), 'agent_question');
+});
+
+test('classifies internal questions with quoted draft text as agent questions', () => {
+  const message = [
+    'pero no entiendo. porque añades esto?',
+    '',
+    'If Colissimo confirms that the parcel is being returned, lost, or that there was a delivery issue, please send us that confirmation and we will review the situation again.',
+    '',
+    'reporta que no lo ha recibido?'
+  ].join('\n');
+
+  assert.equal(classifyAgentIntent(message), 'agent_question');
+  assert.equal(resolveCopilotInteraction({
+    message,
+    currentDraft: 'Hi Simon,\n\nThank you for your message.'
+  }), 'agent_question');
 });
 
 test('resolves draft commands with existing drafts as faithful edits by default', () => {
