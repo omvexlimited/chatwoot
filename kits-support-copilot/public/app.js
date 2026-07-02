@@ -209,7 +209,7 @@ function normalizeEmail(value = '') {
   return String(value || '').trim().toLowerCase();
 }
 
-async function loadContext() {
+async function loadContext({ skipLazyDraft = false } = {}) {
   const payload = buildBasePayload();
   if (!payload.conversation_id) {
     setStatus('No context');
@@ -226,7 +226,7 @@ async function loadContext() {
     state.contextResult = result;
     renderContext(result);
     setStatus('Context ready');
-    if (!state.preparedDraftLookupPending) maybeGenerateLazyDraft();
+    if (!skipLazyDraft && !state.preparedDraftLookupPending) maybeGenerateLazyDraft();
     return result;
   } catch (error) {
     if (!isCurrentContext({ contextKey, requestId, type: 'context' })) return;
@@ -490,7 +490,7 @@ async function handleOrderLinkCommand(content) {
     renderChat();
     persistSession();
     setStatus('Order unlinked');
-    const result = await loadContext();
+    const result = await loadContext({ skipLazyDraft: true });
     rememberContextResult(result);
     state.chatMessages = [
       { role: 'user', content },
@@ -514,13 +514,13 @@ async function handleOrderLinkCommand(content) {
   persistSession();
   setStatus(`Linking ${command.orderRef}...`);
 
-  const result = await loadContext();
+  const result = await loadContext({ skipLazyDraft: true });
   rememberContextResult(result);
   const selectedOrderRef = normalizeOrderRef(result?.context_summary?.selected_order_ref);
   const linked = selectedOrderRef === command.orderRef;
-  if (!linked) state.selectedOrderRef = '';
+  if (result && !linked) state.selectedOrderRef = '';
   const assistantMessage = !result
-    ? `Could not reload context for ${command.orderRef}.`
+    ? `Could not reload context for ${command.orderRef}. The manual order link was kept; try refreshing context or run the command again.`
     : linked
       ? `Linked order ${command.orderRef} for this conversation. Context reloaded.`
       : `Order ${command.orderRef} was not found in Shopify.`;
@@ -555,7 +555,10 @@ function resetConversationDraftState({ selectedOrderRef }) {
   state.contextResult = null;
   state.lazyDraftStartedFor = '';
   state.appliedPreparedDraftKey = '';
+  state.preparedDraftLookupPending = false;
+  state.contextRequestId += 1;
   state.chatRequestId += 1;
+  state.preparedDraftRequestId += 1;
   els.draft.value = '';
   els.confidence.textContent = 'confidence: n/a';
   hideInsertNotice();
