@@ -10,7 +10,8 @@ import {
   filterCommandOptions,
   getActiveSlashToken,
   parseOrderLinkCommand,
-  replaceActiveSlashToken
+  replaceActiveSlashToken,
+  shouldReadComposerForAgentMessage
 } from './commands.js';
 
 const SIDEBAR_SPLIT_STORAGE_KEY = 'kr-copilot-sidebar-split-v1';
@@ -561,12 +562,16 @@ function resetConversationDraftState({ selectedOrderRef }) {
 }
 
 async function draftForAgentMessage(content) {
-  if (!isSidebarLayout || !isGrammarCommand(content)) return els.draft.value;
+  if (!isSidebarLayout || !shouldReadComposerForAgentMessage(content)) return els.draft.value;
 
-  const composer = await getReplyEditorContentFromChatwoot();
-  els.draft.value = composer.content || '';
-  persistSession();
-  updateButtons();
+  try {
+    const composer = await getReplyEditorContentFromChatwoot();
+    els.draft.value = composer.content || '';
+    persistSession();
+    updateButtons();
+  } catch (error) {
+    console.warn(`KR Copilot could not read the Chatwoot composer: ${error.message}`);
+  }
   return els.draft.value;
 }
 

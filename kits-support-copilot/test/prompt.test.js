@@ -216,6 +216,49 @@ test('builds chat prompt for internal agent questions without draft regeneration
   assert.match(prompt.user, /draft must remain exactly the same as Current draft/);
 });
 
+test('builds chat prompt for faithful edits over existing drafts', () => {
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Published Playbook Index\nDecision Tree\nCompensation Policy',
+    conversationText: 'INCOMING Customer: My package arrived late.',
+    shopifyContext: {
+      selected_order: { name: '#1895', financial_status: 'paid' },
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'My package arrived late.',
+    agentEmail: 'agent@example.com',
+    currentDraft: [
+      'Hello,',
+      '',
+      'We are sorry for the delay. Your order has now been delivered.',
+      '',
+      'Tracking:',
+      'https://kitsrepublic.com/apps/17TRACK?nums=6A06431779089',
+      '',
+      'Best regards,',
+      'www.kitsrepublic.com'
+    ].join('\n'),
+    chatMessages: [
+      { role: 'user', content: 'ofrécele un 20% de descuento para próximas compras' }
+    ],
+    interactionMode: 'draft_edit'
+  });
+
+  assert.match(prompt.system, /INTERACTION_MODE: draft_edit/);
+  assert.match(prompt.system, /edit to an existing customer draft/);
+  assert.match(prompt.system, /Current draft as the mandatory base document/);
+  assert.match(prompt.system, /Do not regenerate from scratch/);
+  assert.match(prompt.system, /Faithful draft edit rule/);
+  assert.match(prompt.system, /Current draft is the source of truth/);
+  assert.match(prompt.system, /Preserve the existing structure, tone, language, links, signature/);
+  assert.match(prompt.system, /Apply only the change requested/);
+  assert.match(prompt.system, /Set agent_briefing to null/);
+  assert.match(prompt.user, /INTERACTION_MODE: draft_edit/);
+  assert.match(prompt.user, /preserve the Current draft language/);
+  assert.match(prompt.user, /www\.kitsrepublic\.com/);
+  assert.match(prompt.user, /ofrécele un 20%/);
+});
+
 test('builds chat prompt for compact English brief command', () => {
   const prompt = buildCopilotChatPrompt({
     knowledgeBase: 'Published Playbook Index\nDecision Tree\nReturns And Refunds General',

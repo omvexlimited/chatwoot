@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { classifyAgentIntent, isAgentQuestionOnly } from '../src/agent-intent.js';
+import {
+  classifyAgentIntent,
+  isAgentQuestionOnly,
+  isExplicitNewDraftRequest,
+  resolveCopilotInteraction
+} from '../src/agent-intent.js';
 
 test('detects short internal agent questions', () => {
   assert.equal(isAgentQuestionOnly('quiere refund de las 2 orders?'), true);
@@ -28,4 +33,42 @@ test('classifies copilot interaction modes deterministically', () => {
   assert.equal(classifyAgentIntent('qué le respondo?'), 'draft_command');
   assert.equal(classifyAgentIntent('quiere refund de las 2 orders?'), 'agent_question');
   assert.equal(classifyAgentIntent('hay riesgo de chargeback?'), 'agent_question');
+});
+
+test('resolves draft commands with existing drafts as faithful edits by default', () => {
+  assert.equal(resolveCopilotInteraction({
+    message: 'ofrécele un 20% de descuento para próximas compras',
+    currentDraft: 'Hello, thanks for contacting us.\n\nwww.kitsrepublic.com'
+  }), 'draft_edit');
+
+  assert.equal(resolveCopilotInteraction({
+    message: 'hazlo más corto',
+    currentDraft: 'Hello, thanks for contacting us.\n\nwww.kitsrepublic.com'
+  }), 'draft_edit');
+
+  assert.equal(resolveCopilotInteraction({
+    message: 'respondele en ingles',
+    currentDraft: 'Bonjour,\n\nMerci pour votre message.'
+  }), 'draft_edit');
+
+  assert.equal(resolveCopilotInteraction({
+    message: 'ofrécele un 20% de descuento para próximas compras',
+    currentDraft: ''
+  }), 'draft_command');
+});
+
+test('explicit new draft requests bypass draft edit mode', () => {
+  assert.equal(isExplicitNewDraftRequest('haz un nuevo draft desde cero'), true);
+  assert.equal(isExplicitNewDraftRequest('regenera desde cero'), true);
+  assert.equal(isExplicitNewDraftRequest('ignore previous draft'), true);
+
+  assert.equal(resolveCopilotInteraction({
+    message: 'haz un nuevo draft desde cero',
+    currentDraft: 'Existing draft'
+  }), 'draft_command');
+
+  assert.equal(resolveCopilotInteraction({
+    message: 'regenera todo desde cero',
+    currentDraft: 'Existing draft'
+  }), 'draft_command');
 });

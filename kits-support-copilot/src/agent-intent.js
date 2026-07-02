@@ -23,6 +23,13 @@ const FACTUAL_QUESTION_PATTERNS = [
   /\b(talla|size|factura|invoice|review|trustpilot|shopify)\b/i
 ];
 
+const NEW_DRAFT_PATTERNS = [
+  /\b(nuevo draft|nuevo borrador|borrador nuevo|draft nuevo)\b/i,
+  /\b(desde cero|from scratch|start over|empezar de cero|empieza de cero)\b/i,
+  /\b(regenera|regenerate|rehaz|redo)\b.*\b(desde cero|from scratch|todo|completo|nuevo)\b/i,
+  /\b(ignore|ignora|descarta|olvida)\b.*\b(previous draft|current draft|draft anterior|borrador anterior|borrador actual)\b/i
+];
+
 export function classifyAgentIntent(value = '') {
   const text = normalize(value);
   if (!text) return 'draft_command';
@@ -34,8 +41,22 @@ export function classifyAgentIntent(value = '') {
   return 'draft_command';
 }
 
+export function resolveCopilotInteraction({ message = '', currentDraft = '' } = {}) {
+  const baseIntent = classifyAgentIntent(message);
+  const hasDraft = Boolean(normalize(currentDraft));
+  if (baseIntent === 'draft_command' && hasDraft && !isExplicitNewDraftRequest(message)) {
+    return 'draft_edit';
+  }
+  return baseIntent;
+}
+
 export function isAgentQuestionOnly(value = '') {
   return classifyAgentIntent(value) === 'agent_question';
+}
+
+export function isExplicitNewDraftRequest(value = '') {
+  const text = normalize(value);
+  return NEW_DRAFT_PATTERNS.some(pattern => pattern.test(text));
 }
 
 export function isBriefCommand(value = '') {

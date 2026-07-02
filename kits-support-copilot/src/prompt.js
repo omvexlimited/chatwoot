@@ -152,6 +152,7 @@ export function buildCopilotChatPrompt({
   const normalizedChatMessages = normalizeChatMessages(chatMessages);
   const agentQuestionMode = interactionMode === 'agent_question';
   const briefMode = interactionMode === 'initial_brief' || interactionMode === 'brief_command';
+  const draftEditMode = interactionMode === 'draft_edit';
   const baseResponseLanguage = responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext });
   const effectiveResponseLanguage = applyAgentDraftLanguageOverride(baseResponseLanguage, normalizedChatMessages);
   const responseLanguageHint = formatResponseLanguageHint(effectiveResponseLanguage);
@@ -215,7 +216,7 @@ export function buildCopilotChatPrompt({
         ? agentQuestionInstruction()
         : briefMode
           ? compactAgentBriefingInstruction()
-          : draftCommandInstruction(),
+          : draftCommandInstruction({ draftEditMode }),
       agentQuestionMode
         ? 'assistant_message is for the support agent and must be written in Spanish.'
         : briefMode
@@ -289,7 +290,9 @@ export function buildCopilotChatPrompt({
         ? `Final language rule: assistant_message must be written in Spanish for the support agent. draft must remain exactly the same as Current draft, and agent_briefing must be null.`
         : briefMode
           ? `Final language rule: assistant_message and agent_briefing must be written in concise English for the support agent. draft must be written in ${responseLanguageName} unless INTERACTION_MODE is brief_command, in which case draft must remain exactly the same as Current draft.`
-          : `Final language rule: draft must be written in ${responseLanguageName}. If the agent wrote instructions in another language, translate the requested meaning into ${responseLanguageName}; do not copy the agent instruction language into draft unless the agent explicitly requested that draft language. agent_briefing must be null.`
+          : draftEditMode
+            ? `Final language rule: preserve the Current draft language unless the latest agent instruction explicitly asks to change the draft language. If a new language is explicitly requested, rewrite the existing draft faithfully into that language while preserving all existing decisions and content. agent_briefing must be null.`
+            : `Final language rule: draft must be written in ${responseLanguageName}. If the agent wrote instructions in another language, translate the requested meaning into ${responseLanguageName}; do not copy the agent instruction language into draft unless the agent explicitly requested that draft language. agent_briefing must be null.`
     ].join('\n')
   };
 }
@@ -321,6 +324,15 @@ function interactionModeInstruction(mode) {
     ].join(' ');
   }
 
+  if (mode === 'draft_edit') {
+    return [
+      'INTERACTION_MODE: draft_edit.',
+      'The agent is asking for an edit to an existing customer draft.',
+      'Treat Current draft as the mandatory base document and apply only the latest agent instruction.',
+      'Do not regenerate from scratch, do not re-audit the case, and do not drop prior instructions unless the latest agent instruction explicitly asks for it.'
+    ].join(' ');
+  }
+
   return [
     'INTERACTION_MODE: draft_command.',
     'The agent is asking you to prepare, revise, translate, shorten, or otherwise modify the customer reply.',
@@ -342,8 +354,8 @@ function agentQuestionInstruction() {
   ].join(' ');
 }
 
-function draftCommandInstruction() {
-  return [
+function draftCommandInstruction({ draftEditMode = false } = {}) {
+  const commonRules = [
     'Draft command mode rule:',
     'Obey the latest agent instruction above all other context.',
     'Return draft as the final customer-facing reply only.',
@@ -351,6 +363,25 @@ function draftCommandInstruction() {
     'Do not include case analysis, SOP names, decision paths, checklists, or internal warnings in assistant_message or draft.',
     'If the agent asks for a language such as English, French, German, Italian, Portuguese, Catalan, or Spanish, that language becomes the draft language for this turn.',
     'If the agent instruction is a correction like "I said write it in English", rewrite the current draft accordingly and do not re-audit the case.'
+  ];
+
+  if (!draftEditMode) {
+    return [
+      ...commonRules,
+      'If there is no Current draft, create a new customer-ready draft from the case context and latest agent instruction.',
+      'If the agent explicitly asks for a new draft from scratch, ignore the previous draft and generate the best complete reply from the current context.'
+    ].join(' ');
+  }
+
+  return [
+    ...commonRules,
+    'Faithful draft edit rule:',
+    'Current draft is the source of truth for this turn.',
+    'Preserve the existing structure, tone, language, links, signature, verified facts, concessions, conditions, tracking numbers, policy URLs, promises, and previous agent instructions present in the Current draft.',
+    'Apply only the change requested in the latest agent message.',
+    'Do not remove compensation, conditions, URLs, tracking, promises, or useful nuance already present unless the latest agent instruction explicitly asks to remove or contradict them.',
+    'Do not re-open the case, re-run the SOP from scratch, or replace the draft with a generic answer unless the latest agent instruction explicitly asks for a new draft from scratch.',
+    'If the latest agent instruction contradicts the Current draft, obey the latest instruction and keep every unrelated part of the Current draft.'
   ].join(' ');
 }
 
@@ -387,7 +418,8 @@ function draftLanguageInstruction() {
     'If Response language source is agent_explicit_language_request, that explicit agent language request is the DRAFT_LANGUAGE_LOCK and must be obeyed.',
     'If the agent gives instructions in Spanish, Catalan, Portuguese, French, German, Italian, Dutch, or any language different from DRAFT_LANGUAGE_LOCK, translate the meaning into DRAFT_LANGUAGE_LOCK for the customer draft.',
     'Never let incidental agent instruction language override the customer draft language.',
-    'If Current draft is in the wrong language, rewrite it into DRAFT_LANGUAGE_LOCK instead of preserving that wrong language.'
+    'If INTERACTION_MODE is draft_edit, preserve Current draft language unless the latest agent instruction explicitly requests another draft language.',
+    'If Current draft is in the wrong language and INTERACTION_MODE is not draft_edit, rewrite it into DRAFT_LANGUAGE_LOCK instead of preserving that wrong language.'
   ].join(' ');
 }
 

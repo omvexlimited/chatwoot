@@ -4,7 +4,8 @@ import {
   filterCommandOptions,
   getActiveSlashToken,
   parseOrderLinkCommand,
-  replaceActiveSlashToken
+  replaceActiveSlashToken,
+  shouldReadComposerForAgentMessage
 } from '../public/commands.js';
 
 test('filters commands by slash query', () => {
@@ -96,4 +97,21 @@ test('parses missing order in local order link command', () => {
     name: 'linkorder',
     orderRef: ''
   });
+});
+
+test('reads Chatwoot composer for draft-like agent instructions', () => {
+  assert.equal(shouldReadComposerForAgentMessage('/grammar'), true);
+  assert.equal(shouldReadComposerForAgentMessage('ofrécele un 20% de descuento para próximas compras'), true);
+  assert.equal(shouldReadComposerForAgentMessage('hazlo más corto'), true);
+  assert.equal(shouldReadComposerForAgentMessage('respondele en ingles'), true);
+  assert.equal(shouldReadComposerForAgentMessage('dije que lo escribas en inglés'), true);
+});
+
+test('does not read Chatwoot composer for utility commands or internal questions', () => {
+  assert.equal(shouldReadComposerForAgentMessage('/brief'), false);
+  assert.equal(shouldReadComposerForAgentMessage('/newticket'), false);
+  assert.equal(shouldReadComposerForAgentMessage('/remember test'), false);
+  assert.equal(shouldReadComposerForAgentMessage('quiere refund de las 2 orders?'), false);
+  assert.equal(shouldReadComposerForAgentMessage('qué hago?'), false);
+  assert.equal(shouldReadComposerForAgentMessage('no entiendo esto'), false);
 });

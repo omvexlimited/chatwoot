@@ -129,6 +129,19 @@ export function parseOrderLinkCommand(value = '') {
   };
 }
 
+export function shouldReadComposerForAgentMessage(value = '') {
+  const content = String(value || '').trim();
+  if (!content) return false;
+
+  const normalized = normalizeText(content);
+  if (normalized === '/grammar') return true;
+  if (content.startsWith('/')) return false;
+  if (isDraftLikeInstruction(normalized)) return true;
+  if (isInternalAgentQuestion(normalized)) return false;
+
+  return true;
+}
+
 export function linkableCommandTexts() {
   const commands = [];
   const seen = new Set();
@@ -151,6 +164,31 @@ function normalizeQuery(value = '') {
 function normalizeOrderRef(value = '') {
   const clean = String(value || '').trim().replace(/^#?/, '');
   return clean ? `#${clean}` : '';
+}
+
+function isDraftLikeInstruction(value = '') {
+  return [
+    /\b(dile|di le|responde|responder|respondele|resp[oó]ndele|contesta|contestale|cont[eé]stale|escribe|redacta|prepara|prep[aá]rale)\b/i,
+    /\b(reescribe|cambia|a[nñ]ade|agrega|quita|pon|incluye|ofrece|ofrecele|ofr[eé]cele|ofrecer|offer|add|change|remove|rewrite|rephrase)\b/i,
+    /\b(hazlo|haz la respuesta|m[aá]s corto|mas corto|shorter|more concise|less info|menos info)\b/i,
+    /\b(en ingl[eé]s|en ingles|in english|en franc[eé]s|en frances|in french|en alem[aá]n|en aleman|in german|en italiano|in italian|en portugu[eé]s|en portugues|in portuguese|en catal[aá]n|en catalan|in catalan)\b/i,
+    /\b(que le digo|qu[eé] le digo|que le dices|qu[eé] le dices|que le respondo|qu[eé] le respondo|que respondemos|qu[eé] respondemos)\b/i,
+    /\b(dije que|te dije que|i said|i told you)\b.*\b(escrib|write|english|ingl[eé]s|ingles|franc[eé]s|frances)\b/i
+  ].some(pattern => pattern.test(value));
+}
+
+function isInternalAgentQuestion(value = '') {
+  return [
+    /\b(no entiendo|me confirmas|confirmame|conf[ií]rmame|puedes confirmar|can you confirm)\b/i,
+    /\b(que dice|qu[eé] dice|what does|qu[eé] significa|que significa)\b/i,
+    /\b(que hago|qu[eé] hago|que hacemos|qu[eé] hacemos|deberiamos|deber[ií]amos|should we|what should we do)\b/i,
+    /\b(esto es|este es|esta es|es este|es esta|is this|is it|does this mean)\b/i,
+    /\b(quiere|quieren|pide|piden|pidio|pidi[oó]|solicita|solicitan|acepta|aceptan)\b/i
+  ].some(pattern => pattern.test(value)) || /[¿?]/.test(value);
+}
+
+function normalizeText(value = '') {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function findTokenStart(text, cursor) {

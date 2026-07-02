@@ -25,7 +25,7 @@ import { extractAttachmentCandidates } from './attachment-candidates.js';
 import { analyzeAttachmentCandidates } from './attachment-analysis.js';
 import { buildCaseReview, withCaseReviewDraft } from './case-review.js';
 import { createPlaybookKnowledgeProvider } from './playbook-knowledge.js';
-import { classifyAgentIntent } from './agent-intent.js';
+import { resolveCopilotInteraction } from './agent-intent.js';
 import {
   ensureMemoryTable,
   formatPromptMemories,
@@ -260,11 +260,14 @@ async function handleCopilotChat(req, res) {
   const command = latestUserCommand(chatMessages);
   const pendingIssue = normalizePendingIssue(body.pending_issue);
   const latestUserMessage = latestUserChatMessage(chatMessages);
-  const interactionType = classifyAgentIntent(latestUserMessage);
+  const interactionType = resolveCopilotInteraction({
+    message: latestUserMessage,
+    currentDraft
+  });
   const agentQuestionOnly = interactionType === 'agent_question';
   const briefOnly = interactionType === 'brief_command';
   const initialBrief = interactionType === 'initial_brief';
-  const draftCommand = interactionType === 'draft_command' || interactionType === 'utility_command';
+  const draftCommand = interactionType === 'draft_command' || interactionType === 'draft_edit' || interactionType === 'utility_command';
   const ticketResult = await runNewTicketCommand({
     command,
     config,
