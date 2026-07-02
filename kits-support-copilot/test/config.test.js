@@ -119,6 +119,15 @@ test('supports Chatwoot webhook secret', () => {
   assert.equal(getConfigStatus(config).chatwoot_webhook, true);
 });
 
+test('supports configurable Chatwoot request timeout', () => {
+  const config = loadConfig({
+    CHATWOOT_REQUEST_TIMEOUT_MS: '2500'
+  });
+
+  assert.equal(config.chatwootRequestTimeoutMs, 2500);
+  assert.equal(loadConfig({ CHATWOOT_REQUEST_TIMEOUT_MS: '0' }).chatwootRequestTimeoutMs, 8000);
+});
+
 test('supports Kits admin base URL override', () => {
   const config = loadConfig({
     KITS_ADMIN_BASE_URL: 'https://admin.example.test/',

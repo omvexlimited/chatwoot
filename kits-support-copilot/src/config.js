@@ -38,7 +38,11 @@ export function loadConfig(env = process.env) {
     chatwootBaseUrl,
     chatwootAccountId: envValue(env, ['CHATWOOT_ACCOUNT_ID']),
     chatwootApiToken: envValue(env, ['CHATWOOT_API_TOKEN']),
-    chatwootWebhookSecret: envValue(env, ['CHATWOOT_WEBHOOK_SECRET'])
+    chatwootWebhookSecret: envValue(env, ['CHATWOOT_WEBHOOK_SECRET']),
+    chatwootRequestTimeoutMs: positiveNumber(
+      envValue(env, ['CHATWOOT_REQUEST_TIMEOUT_MS']),
+      8000
+    )
   };
 }
 
@@ -94,4 +98,9 @@ function stripOptionalQuotes(value) {
     return value.slice(1, -1).trim();
   }
   return value;
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
