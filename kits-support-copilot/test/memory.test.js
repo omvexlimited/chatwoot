@@ -24,6 +24,7 @@ test('parses copilot memory commands', () => {
   assert.deepEqual(parseCopilotCommand('/linkorder #2280'), { name: 'linkorder', argument: '#2280' });
   assert.deepEqual(parseCopilotCommand('/unlinkorder'), { name: 'unlinkorder', argument: '' });
   assert.deepEqual(parseCopilotCommand('/grammar'), { name: 'grammar', argument: '' });
+  assert.deepEqual(parseCopilotCommand('/brief'), { name: 'brief', argument: '' });
   assert.deepEqual(parseCopilotCommand('/help'), { name: 'help', argument: '' });
   assert.equal(parseCopilotCommand('normal message'), null);
 });
@@ -83,7 +84,17 @@ test('runs /help without memory database configuration', async () => {
   assert.match(result.assistant_message, /\/memories/);
   assert.match(result.assistant_message, /\/forget <id>/);
   assert.match(result.assistant_message, /\/grammar/);
+  assert.match(result.assistant_message, /\/brief/);
   assert.match(result.assistant_message, /\/help/);
+});
+
+test('lets /brief pass through to copilot chat handler', async () => {
+  const result = await runMemoryCommand({
+    command: parseCopilotCommand('/brief'),
+    config: {}
+  });
+
+  assert.equal(result, null);
 });
 
 test('returns clear memory not configured response for storage commands', async () => {

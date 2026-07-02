@@ -393,6 +393,31 @@ export function formatAgentBriefingForChat(briefing = {}) {
   return lines.join('\n');
 }
 
+export function formatCompactAgentBriefingForChat(briefing = {}) {
+  const lines = ['Brief prepared.'];
+  const facts = normalizeArray(briefing.verified_facts).slice(0, 3);
+  const missing = normalizeArray(briefing.missing_information).slice(0, 2);
+  const risks = normalizeArray(briefing.risks_or_warnings).slice(0, 2);
+
+  if (briefing.detected_case) lines.push(`Case: ${briefing.detected_case}`);
+  if (briefing.playbook_used) lines.push(`SOP used: ${briefing.playbook_used}`);
+  if (briefing.recommended_decision) lines.push(`Decision: ${briefing.recommended_decision}`);
+  if (facts.length) lines.push(`Key facts: ${facts.join(' / ')}`);
+  if (missing.length) lines.push(`Missing / check before sending: ${missing.join(' / ')}`);
+
+  const checklist = normalizeArray(briefing.before_sending_checklist)
+    .filter(item => !/^(No manual action|No hace falta acción manual)/i.test(item))
+    .slice(0, 2);
+  if (!missing.length && checklist.length) {
+    lines.push(`Missing / check before sending: ${checklist.join(' / ')}`);
+  }
+
+  if (briefing.post_send_action) lines.push(`After sending: ${briefing.post_send_action}`);
+  if (risks.length) lines.push(`Risks: ${risks.join(' / ')}`);
+
+  return lines.slice(0, 9).join('\n');
+}
+
 async function claimPendingPreparedDrafts({ config, limit }) {
   return withPreparedDraftClient(config, async client => {
     const result = await client.query(

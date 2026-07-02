@@ -74,7 +74,7 @@ export function buildPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
-      playbookDecisionInstruction(),
+      playbookDecisionInstruction({ agentQuestionMode, briefMode }),
       caseReviewInstruction(),
       attachmentEvidenceInstruction(),
       providerTrackingInstruction(),
@@ -151,6 +151,7 @@ export function buildCopilotChatPrompt({
 }) {
   const normalizedChatMessages = normalizeChatMessages(chatMessages);
   const agentQuestionMode = interactionMode === 'agent_question';
+  const briefMode = interactionMode === 'initial_brief' || interactionMode === 'brief_command';
   const baseResponseLanguage = responseLanguage || inferResponseLanguage({ latestMessage, shopifyContext });
   const effectiveResponseLanguage = applyAgentDraftLanguageOverride(baseResponseLanguage, normalizedChatMessages);
   const responseLanguageHint = formatResponseLanguageHint(effectiveResponseLanguage);
@@ -174,7 +175,7 @@ export function buildCopilotChatPrompt({
     system: [
       'You are KR Copilot, an internal support chat assistant for Kits Republic agents.',
       'You help the agent inspect the case, revise drafts, and produce a customer-ready draft for human review.',
-      interactionModeInstruction(agentQuestionMode),
+      interactionModeInstruction(interactionMode),
       'Highest priority rule: the agent instruction in the current copilot chat is the final authority for what the draft should say.',
       'When the agent explicitly states an operational fact, use it in the draft even if Shopify, tracking, the previous draft, or the playbook appears incomplete, stale, or contradictory.',
       'Do not challenge, debate, or correct explicit agent instructions in assistant_message. Do not write "I should avoid saying", "I can’t state", "Shopify already shows", "Shopify only supports", "verified Shopify", or similar refusal language.',
@@ -204,14 +205,22 @@ export function buildCopilotChatPrompt({
       'For Apple Pay/no confirmation email symptoms, explain that the email may not have been transmitted correctly, and ask for phone number, full name, or shipping address to locate the order. Do not ask first for the same missing email or for an order number the customer says they cannot find.',
       supportToneInstruction(),
       linkInstruction(),
-      playbookDecisionInstruction(),
+      playbookDecisionInstruction({ agentQuestionMode, briefMode }),
       caseReviewInstruction(),
       attachmentEvidenceInstruction(),
       providerTrackingInstruction(),
       customsPendingInstruction(),
       deliveryEstimateInstruction(),
-      agentQuestionMode ? agentQuestionInstruction() : agentBriefingInstruction(),
-      'assistant_message is for the support agent and must be written in Spanish.',
+      agentQuestionMode
+        ? agentQuestionInstruction()
+        : briefMode
+          ? compactAgentBriefingInstruction()
+          : draftCommandInstruction(),
+      agentQuestionMode
+        ? 'assistant_message is for the support agent and must be written in Spanish.'
+        : briefMode
+          ? 'assistant_message and agent_briefing are internal and must be written in concise English.'
+          : 'assistant_message is not shown as a case brief in draft mode; the server displays the final draft text to the agent.',
       'draft must contain only the customer-ready reply text, with no labels, no analysis, and no markdown tables.',
       draftLanguageInstruction(),
       'Signature rule: close with a natural sign-off in the customer language, then a new line with exactly www.kitsrepublic.com. Never sign as "Equipo Kits Republic", "Kits Republic team", an agent name, or any team/company name.',
@@ -227,7 +236,7 @@ export function buildCopilotChatPrompt({
       `Agent chat language: ${agentChatLanguage}`,
       `Response language: ${responseLanguageHint}`,
       `DRAFT_LANGUAGE_LOCK: ${responseLanguageName}`,
-      `INTERACTION_MODE: ${agentQuestionMode ? 'agent_question' : 'draft'}`,
+      `INTERACTION_MODE: ${interactionMode}`,
       '',
       'Agent confirmed facts:',
       agentConfirmedFactsSummary,
@@ -278,13 +287,15 @@ export function buildCopilotChatPrompt({
       '',
       agentQuestionMode
         ? `Final language rule: assistant_message must be written in Spanish for the support agent. draft must remain exactly the same as Current draft, and agent_briefing must be null.`
-        : `Final language rule: assistant_message and agent_briefing must be written in Spanish for the support agent, but draft must be written in ${responseLanguageName}. If the agent wrote instructions in another language, translate the requested meaning into ${responseLanguageName}; do not copy the agent instruction language into draft.`
+        : briefMode
+          ? `Final language rule: assistant_message and agent_briefing must be written in concise English for the support agent. draft must be written in ${responseLanguageName} unless INTERACTION_MODE is brief_command, in which case draft must remain exactly the same as Current draft.`
+          : `Final language rule: draft must be written in ${responseLanguageName}. If the agent wrote instructions in another language, translate the requested meaning into ${responseLanguageName}; do not copy the agent instruction language into draft unless the agent explicitly requested that draft language. agent_briefing must be null.`
     ].join('\n')
   };
 }
 
-function interactionModeInstruction(agentQuestionMode) {
-  if (agentQuestionMode) {
+function interactionModeInstruction(mode) {
+  if (mode === 'agent_question') {
     return [
       'INTERACTION_MODE: agent_question.',
       'The latest agent message is an internal question or clarification request, not a request to create or revise a customer reply.',
@@ -294,9 +305,27 @@ function interactionModeInstruction(agentQuestionMode) {
     ].join(' ');
   }
 
+  if (mode === 'initial_brief') {
+    return [
+      'INTERACTION_MODE: initial_brief.',
+      'This is the first automatic draft for the case. Generate a customer-ready draft and a concise English internal brief.',
+      'The brief must help the agent review the case quickly, not audit every detail.'
+    ].join(' ');
+  }
+
+  if (mode === 'brief_command') {
+    return [
+      'INTERACTION_MODE: brief_command.',
+      'The agent explicitly requested /brief. Return only a concise English internal brief and preserve the current customer draft exactly.',
+      'Do not rewrite, regenerate, or insert a customer draft in this mode.'
+    ].join(' ');
+  }
+
   return [
-    'INTERACTION_MODE: draft.',
-    'The agent is asking you to prepare, revise, or validate a customer reply. Generate or preserve the customer draft as requested and include an internal agent briefing.'
+    'INTERACTION_MODE: draft_command.',
+    'The agent is asking you to prepare, revise, translate, shorten, or otherwise modify the customer reply.',
+    'The agent instruction has priority over SOP wording and inferred language unless it asks you to invent an unconfirmed completed action.',
+    'Return the customer-ready draft directly. Do not produce a visible case brief.'
   ].join(' ');
 }
 
@@ -310,6 +339,30 @@ function agentQuestionInstruction() {
     'Set agent_briefing to null.',
     'Set draft to the exact Current draft text if one exists, otherwise set draft to an empty string.',
     'Set warnings only for real data/API/image-analysis limitations.'
+  ].join(' ');
+}
+
+function draftCommandInstruction() {
+  return [
+    'Draft command mode rule:',
+    'Obey the latest agent instruction above all other context.',
+    'Return draft as the final customer-facing reply only.',
+    'Set agent_briefing to null.',
+    'Do not include case analysis, SOP names, decision paths, checklists, or internal warnings in assistant_message or draft.',
+    'If the agent asks for a language such as English, French, German, Italian, Portuguese, Catalan, or Spanish, that language becomes the draft language for this turn.',
+    'If the agent instruction is a correction like "I said write it in English", rewrite the current draft accordingly and do not re-audit the case.'
+  ].join(' ');
+}
+
+function compactAgentBriefingInstruction() {
+  return [
+    'Compact brief rule:',
+    'Return agent_briefing as a concise English JSON object with keys: summary, detected_case, playbook_used, decision_path, verified_facts, missing_information, recommended_decision, action_required, before_sending_checklist, customer_reply_summary, post_send_action, risks_or_warnings.',
+    'Keep the visible brief short: 8-12 lines maximum when formatted.',
+    'Use short English phrases, not full paragraphs.',
+    'decision_path, verified_facts, missing_information, before_sending_checklist, customer_reply_summary, and risks_or_warnings must be arrays of concise English strings.',
+    'Include only facts that change the decision. Do not repeat obvious Shopify fields unless they matter.',
+    'assistant_message should be a compact English summary of agent_briefing.'
   ].join(' ');
 }
 
@@ -366,13 +419,17 @@ function linkInstruction() {
   ].join(' ');
 }
 
-function playbookDecisionInstruction({ agentQuestionMode = false } = {}) {
+function playbookDecisionInstruction({ agentQuestionMode = false, briefMode = false } = {}) {
   const missingFactTarget = agentQuestionMode
     ? 'explain the missing fact directly in assistant_message'
-    : 'put the missing fact in agent_briefing.missing_information and ask the customer or tell the agent what to verify';
+    : briefMode
+      ? 'put the missing fact in agent_briefing.missing_information and tell the agent what to verify'
+      : 'use the missing fact internally to keep the customer draft conservative; ask the customer only if the fact is required to answer safely';
   const noPlaybookTarget = agentQuestionMode
     ? 'say so briefly in assistant_message'
-    : 'say so in agent_briefing.playbook_used';
+    : briefMode
+      ? 'say so in agent_briefing.playbook_used'
+      : 'do not mention SOP uncertainty in the customer draft';
 
   return [
     'Published Playbooks source-of-truth rule:',
@@ -384,19 +441,6 @@ function playbookDecisionInstruction({ agentQuestionMode = false } = {}) {
     'Use the selected tree action to decide the recommended internal action and customer draft.',
     `If no Playbook is clearly relevant, ${noPlaybookTarget} and fall back to general support rules.`,
     'Never expose Playbook IDs, tree paths, internal SOP labels, source metadata, or decision-tree wording in the customer draft.'
-  ].join(' ');
-}
-
-function agentBriefingInstruction() {
-  return [
-    'Agent briefing rule:',
-    'Return agent_briefing as a JSON object in Spanish with keys: summary, detected_case, playbook_used, decision_path, verified_facts, missing_information, recommended_decision, action_required, before_sending_checklist, customer_reply_summary, post_send_action, risks_or_warnings.',
-    'decision_path, verified_facts, missing_information, before_sending_checklist, customer_reply_summary, and risks_or_warnings must be arrays of concise Spanish strings.',
-    'playbook_used must name the selected Playbook title when one is relevant, or say "No hay Playbook específico confirmado" when none is clearly relevant.',
-    'decision_path must summarize the Decision Tree branch followed, for example "Pregunta: ... > Rama: ... > Acción: ..."; if there is no tree, explain the SOP criterion used.',
-    'recommended_decision must tell the agent what to do, not just what the draft says.',
-    'post_send_action must be one of: resolver, dejar_abierto, esperar_cliente, esperar_proveedor, marcar_duplicado, revisar_manual.',
-    'assistant_message should be a readable Spanish summary of agent_briefing, not a private chain-of-thought.'
   ].join(' ');
 }
 

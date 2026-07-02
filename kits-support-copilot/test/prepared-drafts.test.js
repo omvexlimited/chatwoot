@@ -6,6 +6,7 @@ import {
   buildPreparedDraftPayload,
   enqueuePreparedDraftFromWebhook,
   formatAgentBriefingForChat,
+  formatCompactAgentBriefingForChat,
   getPreparedDraft,
   parsePreparedDraftWebhook,
   verifyChatwootWebhookSignature
@@ -237,4 +238,29 @@ test('formats agent briefing for the copilot chat bubble', () => {
   assert.match(text, /Resumen de respuesta al cliente/);
   assert.match(text, /Después de enviar/);
   assert.match(text, /Avisos/);
+});
+
+test('formats compact English brief for visible copilot briefing', () => {
+  const text = formatCompactAgentBriefingForChat({
+    detected_case: 'tracking_update',
+    playbook_used: 'Tracking / Shipping Updates',
+    decision_path: ['Question: tracking state > Action: explain status'],
+    verified_facts: ['Tracking number: GV123GB.', 'Order is fulfilled.', 'Carrier is Royal Mail.', 'Extra ignored fact.'],
+    missing_information: ['No delivery proof yet.'],
+    recommended_decision: 'Explain the tracking status.',
+    before_sending_checklist: ['Review the draft and send if correct.'],
+    post_send_action: 'leave_open',
+    risks_or_warnings: ['Email differs from Shopify order email.']
+  });
+
+  assert.match(text, /Brief prepared/);
+  assert.match(text, /Case: tracking_update/);
+  assert.match(text, /SOP used: Tracking \/ Shipping Updates/);
+  assert.match(text, /Decision: Explain the tracking status/);
+  assert.match(text, /Key facts:/);
+  assert.match(text, /Missing \/ check before sending:/);
+  assert.match(text, /After sending: leave_open/);
+  assert.match(text, /Risks:/);
+  assert.ok(text.split('\n').length <= 9);
+  assert.doesNotMatch(text, /Borrador preparado/);
 });

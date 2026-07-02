@@ -20,6 +20,7 @@ test('returns all commands for empty slash query', () => {
   assert.ok(commands.includes('/linkorder <order>'));
   assert.ok(commands.includes('/unlinkorder'));
   assert.ok(commands.includes('/grammar'));
+  assert.ok(commands.includes('/brief'));
   assert.ok(commands.includes('/help'));
 });
 

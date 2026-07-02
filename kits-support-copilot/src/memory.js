@@ -31,6 +31,9 @@ const HELP_TEXT = [
   '/grammar',
   'Correct spelling in the current draft only, without rewriting it.',
   '',
+  '/brief',
+  'Show a concise internal case brief without changing the draft.',
+  '',
   '/help',
   'Show this command list.'
 ].join('\n');
@@ -85,6 +88,9 @@ export function parseCopilotCommand(value = '') {
   if (command === '/grammar') {
     return { name: 'grammar', argument };
   }
+  if (command === '/brief') {
+    return { name: 'brief', argument };
+  }
   if (command === '/linkorder') {
     return { name: 'linkorder', argument };
   }
@@ -113,6 +119,9 @@ export async function runMemoryCommand({ command, config, context, agentEmail, s
   }
   if (command.name === 'unknown') {
     return commandResponse(`Unknown command: ${command.raw || 'unknown'}\n\nUse /help to see available commands.`);
+  }
+  if (command.name === 'brief') {
+    return null;
   }
   if (command.name === 'linkorder' || command.name === 'unlinkorder') {
     return commandResponse('This command is handled in the copilot browser UI. Refresh Chatwoot and try again if it did not update the context.');

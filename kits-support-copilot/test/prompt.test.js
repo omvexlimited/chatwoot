@@ -115,10 +115,11 @@ test('builds iterative chat prompt with current draft and chat history', () => {
   assert.match(prompt.system, /Published Playbook Index/);
   assert.match(prompt.system, /Decision Tree/);
   assert.match(prompt.system, /select the most relevant Playbook/);
-  assert.match(prompt.system, /agent_briefing as a JSON object in Spanish/);
-  assert.match(prompt.system, /playbook_used/);
-  assert.match(prompt.system, /decision_path/);
-  assert.match(prompt.system, /post_send_action/);
+  assert.match(prompt.system, /INTERACTION_MODE: draft_command/);
+  assert.match(prompt.system, /Return the customer-ready draft directly/);
+  assert.match(prompt.system, /Draft command mode rule/);
+  assert.match(prompt.system, /Set agent_briefing to null/);
+  assert.doesNotMatch(prompt.system, /agent_briefing as a JSON object in Spanish/);
   assert.match(prompt.system, /Return strict JSON only with keys: assistant_message, draft, agent_briefing, reasoning_summary, confidence, warnings/);
   assert.match(prompt.system, /delivered size exchange/);
   assert.match(prompt.system, /6BMDASXWXFS2/);
@@ -212,6 +213,31 @@ test('builds chat prompt for internal agent questions without draft regeneration
   assert.doesNotMatch(prompt.system, /agent_briefing as a JSON object in Spanish/);
   assert.match(prompt.user, /INTERACTION_MODE: agent_question/);
   assert.match(prompt.user, /Existing customer draft/);
+  assert.match(prompt.user, /draft must remain exactly the same as Current draft/);
+});
+
+test('builds chat prompt for compact English brief command', () => {
+  const prompt = buildCopilotChatPrompt({
+    knowledgeBase: 'Published Playbook Index\nDecision Tree\nReturns And Refunds General',
+    conversationText: 'INCOMING Customer: I want a refund.',
+    shopifyContext: {
+      selected_order: { name: '#2605', financial_status: 'paid' },
+      orders: [],
+      warnings: []
+    },
+    latestMessage: 'I want a refund.',
+    agentEmail: 'agent@example.com',
+    currentDraft: 'Existing customer draft',
+    chatMessages: [{ role: 'user', content: '/brief' }],
+    interactionMode: 'brief_command'
+  });
+
+  assert.match(prompt.system, /INTERACTION_MODE: brief_command/);
+  assert.match(prompt.system, /concise English internal brief/);
+  assert.match(prompt.system, /Compact brief rule/);
+  assert.match(prompt.system, /8-12 lines maximum/);
+  assert.match(prompt.user, /INTERACTION_MODE: brief_command/);
+  assert.match(prompt.user, /agent_briefing must be written in concise English/);
   assert.match(prompt.user, /draft must remain exactly the same as Current draft/);
 });
 
@@ -494,7 +520,7 @@ test('allows agent-confirmed supplier replacement facts and keeps assistant lang
   assert.match(prompt.user, /Agent confirmed facts/);
   assert.match(prompt.user, /supplier_confirmed/);
   assert.match(prompt.user, /replacement_processed/);
-  assert.match(prompt.user, /assistant_message and agent_briefing must be written in Spanish/);
+  assert.match(prompt.user, /agent_briefing must be null/);
   assert.match(prompt.user, /draft must be written in English/);
   assert.match(prompt.user, /translate the requested meaning into English/);
   assert.match(prompt.user, /ya lo hemos reportado al supplier/);

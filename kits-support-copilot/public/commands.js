@@ -52,6 +52,11 @@ export const COPILOT_COMMANDS = [
     keywords: ['spelling', 'correction']
   },
   {
+    command: '/brief',
+    description: 'Show a concise internal case brief.',
+    keywords: ['brief', 'case', 'sop', 'summary']
+  },
+  {
     command: '/help',
     description: 'Show the command list.',
     keywords: ['commands']

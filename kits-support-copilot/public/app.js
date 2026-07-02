@@ -462,7 +462,7 @@ async function sendAgentMessage(rawMessage) {
     persistSession();
     if (isSidebarLayout && result.draft && !result.skip_insert && !result.preserve_draft) {
       await autoInsertReply(result.draft, {
-        policy: isGrammarCommand(content) ? 'manual' : 'auto'
+        policy: isGrammarCommand(content) || result.allow_composer_overwrite ? 'manual' : 'auto'
       });
     } else {
       setStatus('Ready');

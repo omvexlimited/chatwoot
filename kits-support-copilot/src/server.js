@@ -25,7 +25,7 @@ import { extractAttachmentCandidates } from './attachment-candidates.js';
 import { analyzeAttachmentCandidates } from './attachment-analysis.js';
 import { buildCaseReview, withCaseReviewDraft } from './case-review.js';
 import { createPlaybookKnowledgeProvider } from './playbook-knowledge.js';
-import { isAgentQuestionOnly } from './agent-intent.js';
+import { classifyAgentIntent } from './agent-intent.js';
 import {
   ensureMemoryTable,
   formatPromptMemories,
@@ -44,7 +44,7 @@ import {
   buildPreparedDraftPayload,
   enqueuePreparedDraftFromWebhook,
   ensurePreparedDraftsTable,
-  formatAgentBriefingForChat,
+  formatCompactAgentBriefingForChat,
   getLatestInsertedPreparedDraft,
   getPreparedDraft,
   normalizeAgentBriefing,
@@ -260,7 +260,11 @@ async function handleCopilotChat(req, res) {
   const command = latestUserCommand(chatMessages);
   const pendingIssue = normalizePendingIssue(body.pending_issue);
   const latestUserMessage = latestUserChatMessage(chatMessages);
-  const agentQuestionOnly = isAgentQuestionOnly(latestUserMessage);
+  const interactionType = classifyAgentIntent(latestUserMessage);
+  const agentQuestionOnly = interactionType === 'agent_question';
+  const briefOnly = interactionType === 'brief_command';
+  const initialBrief = interactionType === 'initial_brief';
+  const draftCommand = interactionType === 'draft_command' || interactionType === 'utility_command';
   const ticketResult = await runNewTicketCommand({
     command,
     config,
@@ -384,11 +388,24 @@ async function handleCopilotChat(req, res) {
       confidence: 'low',
       warnings: fallbackDraft.warnings
     }
+    : draftCommand
+      ? {
+        assistant_message: currentDraft || fallbackDraft.draft,
+        draft: currentDraft || fallbackDraft.draft,
+        agent_briefing: null,
+        reasoning_summary: currentDraft
+          ? 'OpenAI was unavailable, so the current draft was preserved for the agent command.'
+          : fallbackDraft.reasoning_summary,
+        confidence: currentDraft ? 'low' : fallbackDraft.confidence,
+        warnings: fallbackDraft.warnings
+      }
     : {
-      assistant_message: formatAgentBriefingForChat(fallbackBriefing),
-      draft: currentDraft || fallbackDraft.draft,
+      assistant_message: formatCompactAgentBriefingForChat(fallbackBriefing),
+      draft: briefOnly ? currentDraft : currentDraft || fallbackDraft.draft,
       agent_briefing: fallbackBriefing,
-      reasoning_summary: currentDraft
+      reasoning_summary: briefOnly
+        ? 'OpenAI was unavailable, so the current draft was preserved and a fallback brief was shown.'
+        : currentDraft
         ? 'OpenAI was unavailable, so the existing draft was preserved.'
         : fallbackDraft.reasoning_summary,
       confidence: currentDraft ? 'low' : fallbackDraft.confidence,
@@ -412,7 +429,7 @@ async function handleCopilotChat(req, res) {
     issueContext: context.issueContext,
     attachmentAnalysis: context.attachmentAnalysis,
     caseReview: context.caseReview,
-    interactionMode: agentQuestionOnly ? 'agent_question' : 'draft'
+    interactionMode: interactionType
   });
 
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
@@ -436,7 +453,35 @@ async function handleCopilotChat(req, res) {
       approvedMemories: memoryResult.memories,
       preserveDraft: true,
       skipInsert: true,
-      agentBriefing: null
+      agentBriefing: null,
+      interactionType
+    });
+  }
+
+  if (briefOnly) {
+    const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...(knowledge.warnings || [])]);
+    const agentBriefing = normalizeAgentBriefing(result.agent_briefing, {
+      context,
+      result: {
+        ...result,
+        draft: currentDraft,
+        warnings
+      }
+    });
+    return sendCopilotChatResponse(res, {
+      context,
+      responseContext,
+      assistantMessage: formatCompactAgentBriefingForChat(agentBriefing),
+      draft: currentDraft,
+      reasoningSummary: result.reasoning_summary,
+      confidence: result.confidence,
+      warnings,
+      agentConfirmedFacts,
+      approvedMemories: memoryResult.memories,
+      preserveDraft: true,
+      skipInsert: true,
+      agentBriefing,
+      interactionType
     });
   }
 
@@ -458,7 +503,9 @@ async function handleCopilotChat(req, res) {
     }
   });
   const assistantMessage = normalizeAssistantMessage({
-    assistantMessage: result.agent_briefing ? formatAgentBriefingForChat(agentBriefing) : result.assistant_message,
+    assistantMessage: initialBrief
+      ? formatCompactAgentBriefingForChat(agentBriefing)
+      : draft,
     agentConfirmedFacts,
     chatMessages
   });
@@ -473,7 +520,9 @@ async function handleCopilotChat(req, res) {
     warnings,
     agentConfirmedFacts,
     approvedMemories: memoryResult.memories,
-    agentBriefing
+    agentBriefing: initialBrief ? agentBriefing : null,
+    interactionType,
+    allowComposerOverwrite: draftCommand
   });
 }
 
@@ -589,7 +638,9 @@ function sendCopilotChatResponse(res, {
   preserveDraft = false,
   skipInsert = false,
   pendingIssue = null,
-  agentBriefing = null
+  agentBriefing = null,
+  interactionType = '',
+  allowComposerOverwrite = false
 }) {
   return sendJson(res, 200, {
     assistant_message: assistantMessage,
@@ -614,7 +665,9 @@ function sendCopilotChatResponse(res, {
     warnings: uniqueStrings([...warnings, ...(context.warnings || [])]),
     preserve_draft: preserveDraft,
     skip_insert: skipInsert,
-    pending_issue: pendingIssue
+    pending_issue: pendingIssue,
+    interaction_type: interactionType,
+    allow_composer_overwrite: allowComposerOverwrite
   });
 }
 
@@ -920,7 +973,7 @@ async function generatePreparedDraftForJob(row) {
     }
   });
   const fallback = {
-    assistant_message: formatAgentBriefingForChat(fallbackBriefing),
+    assistant_message: formatCompactAgentBriefingForChat(fallbackBriefing),
     draft: fallbackDraft.draft,
     agent_briefing: fallbackBriefing,
     reasoning_summary: fallbackDraft.reasoning_summary,
@@ -957,7 +1010,7 @@ async function generatePreparedDraftForJob(row) {
 
   return {
     draft,
-    assistant_message: formatAgentBriefingForChat(agentBriefing),
+    assistant_message: formatCompactAgentBriefingForChat(agentBriefing),
     agent_briefing: agentBriefing,
     reasoning_summary: result.reasoning_summary,
     context_summary: summarizeContext(context),
@@ -1032,11 +1085,12 @@ function buildPreparedDraftPrompt({ context, approvedMemories = [], knowledgeBas
       'Return strict JSON only with keys: draft, reasoning_summary, confidence, warnings.',
       [
         'Return strict JSON only with keys: assistant_message, draft, agent_briefing, reasoning_summary, confidence, warnings.',
-        'assistant_message is internal and must be written in Spanish for the support agent.',
-        'agent_briefing is internal and must be a JSON object in Spanish with keys: summary, detected_case, playbook_used, decision_path, verified_facts, missing_information, recommended_decision, action_required, before_sending_checklist, customer_reply_summary, post_send_action, risks_or_warnings.',
+        'assistant_message is internal and must be written in concise English for the support agent.',
+        'agent_briefing is internal and must be a concise English JSON object with keys: summary, detected_case, playbook_used, decision_path, verified_facts, missing_information, recommended_decision, action_required, before_sending_checklist, customer_reply_summary, post_send_action, risks_or_warnings.',
         'Use the published Playbook documentation and Decision Tree when relevant. Include the selected Playbook and tree path in agent_briefing, not in the customer draft.',
-        'before_sending_checklist must explicitly list any manual Shopify/admin/supplier action needed before sending the customer reply.',
-        'If no manual action is needed, before_sending_checklist must include exactly: "No hace falta acción manual. Revisa el borrador y envíalo si está correcto."',
+        'Keep the visible brief short: 8-12 lines maximum when formatted.',
+        'before_sending_checklist must only list manual Shopify/admin/supplier actions that matter before sending.',
+        'If no manual action is needed, before_sending_checklist must include exactly: "No manual action needed. Review the draft and send it if correct."',
         'Never put agent_briefing content inside the customer draft.'
       ].join('\n')
     ),
@@ -1044,7 +1098,7 @@ function buildPreparedDraftPrompt({ context, approvedMemories = [], knowledgeBas
       prompt.user,
       '',
       'Background pre-draft task:',
-      'Generate the customer draft now. Also generate an internal Spanish agent_briefing that summarizes what the agent must do before sending.',
+      'Generate the customer draft now. Also generate a concise English internal agent_briefing that summarizes what the agent must do before sending.',
       '',
       'Approved support memories:',
       JSON.stringify(formatPromptMemories(approvedMemories), null, 2)
