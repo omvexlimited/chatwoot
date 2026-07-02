@@ -82,18 +82,38 @@ export async function listConversations({ config, accountId, status = 'open', pa
 }
 
 async function chatwootRequest(config, url, options) {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      api_access_token: config.chatwootApiToken,
-      ...(options.headers || {})
+  const controller = new AbortController();
+  const timeoutMs = positiveNumber(config.chatwootRequestTimeoutMs, 8000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      signal: options.signal || controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        api_access_token: config.chatwootApiToken,
+        ...(options.headers || {})
+      }
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Chatwoot request timed out after ${timeoutMs}ms`);
     }
-  });
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data?.message || data?.error || `Chatwoot HTTP ${response.status}`);
   }
   return data;
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
