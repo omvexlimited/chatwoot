@@ -19,6 +19,9 @@ const SIDEBAR_SPLIT_LIMITS = {
   contextMaxRatio: 0.7,
   chatMin: 220
 };
+const API_TIMEOUT_MS = 60000;
+const CONTEXT_API_TIMEOUT_MS = 25000;
+const PREPARED_DRAFT_API_TIMEOUT_MS = 12000;
 
 const state = {
   appContext: null,
@@ -220,7 +223,10 @@ async function loadContext() {
   state.contextRequestId = requestId;
   setStatus('Loading context...');
   try {
-    const result = await api('/api/context', payload);
+    const result = await api('/api/context', payload, {
+      label: 'Context',
+      timeoutMs: CONTEXT_API_TIMEOUT_MS
+    });
     if (!isCurrentContext({ contextKey, requestId, type: 'context' })) return;
     state.contextResult = result;
     renderContext(result);
@@ -248,7 +254,10 @@ async function loadPreparedDraft({ pollAttempt = 0 } = {}) {
   state.preparedDraftLookupPending = true;
 
   try {
-    const result = await api('/api/prepared-draft', payload);
+    const result = await api('/api/prepared-draft', payload, {
+      label: 'Prepared draft',
+      timeoutMs: PREPARED_DRAFT_API_TIMEOUT_MS
+    });
     if (!isCurrentContext({ contextKey, requestId, type: 'preparedDraft' })) return;
 
     if (result.status === 'generated' && result.draft) {
@@ -1204,18 +1213,35 @@ function resetChat() {
   setStatus('Cleared');
 }
 
-async function api(path, payload) {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(state.token ? { Authorization: `Bearer ${state.token}` } : {})
-    },
-    body: JSON.stringify(payload)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-  return data;
+async function api(path, payload, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || API_TIMEOUT_MS);
+  const label = options.label || 'Request';
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timeoutId = controller && timeoutMs > 0
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(state.token ? { Authorization: `Bearer ${state.token}` } : {})
+      },
+      body: JSON.stringify(payload),
+      ...(controller ? { signal: controller.signal } : {})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    return data;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`${label} request timed out after ${Math.round(timeoutMs / 1000)}s.`);
+    }
+    throw error;
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
 }
 
 function persistSession() {
