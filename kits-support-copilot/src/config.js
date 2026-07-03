@@ -26,6 +26,8 @@ export function loadConfig(env = process.env) {
     shopifyClientSecret: envValue(env, ['SHOPIFY_CLIENT_SECRET', 'SHOPIFY_KITS_REPUBLIC_CLIENT_SECRET']),
     shopifyAuthModePreference: envValue(env, ['SHOPIFY_AUTH_MODE']).toLowerCase(),
     shopifyApiVersion: envValue(env, ['SHOPIFY_API_VERSION'], '2026-04'),
+    shopifyRequestTimeoutMs: positiveNumber(envValue(env, ['SHOPIFY_REQUEST_TIMEOUT_MS']), 5000),
+    shopifyQueryConcurrency: positiveNumber(envValue(env, ['SHOPIFY_QUERY_CONCURRENCY']), 8),
     krAnalyticsDatabaseUrl: envValue(env, ['KR_ANALYTICS_DATABASE_URL']) || kitsRepublicDatabaseUrl || envValue(env, ['KR_PROVIDER_DATABASE_URL']),
     krAnalyticsStoreId: envValue(env, ['KR_ANALYTICS_STORE_ID', 'KR_PROVIDER_STORE_ID'], 'kits_republic'),
     krAnalyticsDatabaseSsl: envValue(env, ['KR_ANALYTICS_DATABASE_SSL', 'KITS_REPUBLIC_DATABASE_SSL', 'KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',

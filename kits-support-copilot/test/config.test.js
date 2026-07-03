@@ -55,11 +55,15 @@ test('prefers Shopify client credentials when both auth modes are present', () =
 test('supports existing Railway Shopify admin token aliases', () => {
   const config = loadConfig({
     SHOPIFY_SHOP_NAME: 'kits-republic',
-    SHOPIFY_ADMIN_API_ACCESS_TOKEN: 'direct-token'
+    SHOPIFY_ADMIN_API_ACCESS_TOKEN: 'direct-token',
+    SHOPIFY_REQUEST_TIMEOUT_MS: '3000',
+    SHOPIFY_QUERY_CONCURRENCY: '4'
   });
 
   assert.equal(config.shopifyStoreDomain, 'kits-republic.myshopify.com');
   assert.equal(config.shopifyAdminAccessToken, 'direct-token');
+  assert.equal(config.shopifyRequestTimeoutMs, 3000);
+  assert.equal(config.shopifyQueryConcurrency, 4);
   assert.equal(getConfigStatus(config).shopify, true);
   assert.equal(getConfigStatus(config).shopify_auth_mode, 'admin_access_token');
 });
