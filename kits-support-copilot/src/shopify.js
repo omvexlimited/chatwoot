@@ -119,34 +119,25 @@ export async function getShopifyContext({ config, contactEmail, contactPhone, co
 
   const orderMap = new Map();
   const trustedOrderRefs = new Set();
-  for (const query of queries) {
-    try {
-      const orders = await searchOrders({ config, accessToken, query });
-      for (const order of orders) {
-        orderMap.set(order.id, compactOrder(order));
-      }
-    } catch (error) {
-      warnings.push(`Shopify query failed for "${query}": ${error.message}`);
-    }
-  }
+  const initialSearch = await searchOrdersForQueries({ config, accessToken, queries });
+  warnings.push(...initialSearch.warnings);
+  addOrdersToMap(orderMap, initialSearch.orders);
 
   const email = normalizeEmail(contactEmail || identifiers.emails[0]);
   if (shouldRunInternalEmailFallback({ orders: [...orderMap.values()], email })) {
     try {
       const internalOrderRefs = await lookupInternalOrderRefsByEmail({ config, email });
+      const fallbackQueries = [];
       for (const orderRef of internalOrderRefs) {
         trustedOrderRefs.add(orderRef);
-        const fallbackQueries = withOrderStatusQueries(`name:${orderRef}`).filter(query => !queries.includes(query));
-
-        for (const query of fallbackQueries) {
+        for (const query of withOrderStatusQueries(`name:${orderRef}`).filter(query => !queries.includes(query))) {
           queries.push(query);
-
-          const orders = await searchOrders({ config, accessToken, query });
-          for (const order of orders) {
-            orderMap.set(order.id, compactOrder(order));
-          }
+          fallbackQueries.push(query);
         }
       }
+      const fallbackSearch = await searchOrdersForQueries({ config, accessToken, queries: fallbackQueries });
+      warnings.push(...fallbackSearch.warnings);
+      addOrdersToMap(orderMap, fallbackSearch.orders);
     } catch (error) {
       warnings.push(`Kits Republic email fallback lookup failed: ${error.message}`);
     }
@@ -425,19 +416,58 @@ function uniqueOrders(orders = []) {
   });
 }
 
+async function searchOrdersForQueries({ config, accessToken, queries = [] }) {
+  const normalizedQueries = [...new Set(queries.map(query => String(query || '').trim()).filter(Boolean))];
+  if (!normalizedQueries.length) return { orders: [], warnings: [] };
+
+  const orders = [];
+  const warnings = [];
+  const concurrency = Math.max(1, Math.min(Math.floor(Number(config.shopifyQueryConcurrency || 8)), 12));
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < normalizedQueries.length) {
+      const query = normalizedQueries[nextIndex];
+      nextIndex += 1;
+      try {
+        const rows = await searchOrders({ config, accessToken, query });
+        orders.push(...rows);
+      } catch (error) {
+        warnings.push(`Shopify query failed for "${query}": ${error.message}`);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, normalizedQueries.length) }, () => worker())
+  );
+
+  return { orders, warnings };
+}
+
+function addOrdersToMap(orderMap, orders = []) {
+  for (const order of orders) {
+    if (order?.id) orderMap.set(order.id, compactOrder(order));
+  }
+}
+
 async function searchOrders({ config, accessToken, query }) {
   const url = `https://${config.shopifyStoreDomain}/admin/api/${config.shopifyApiVersion}/graphql.json`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': accessToken
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': accessToken
+      },
+      body: JSON.stringify({
+        query: ORDER_QUERY,
+        variables: { query }
+      })
     },
-    body: JSON.stringify({
-      query: ORDER_QUERY,
-      variables: { query }
-    })
-  });
+    positiveNumber(config.shopifyRequestTimeoutMs, 5000)
+  );
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -466,14 +496,18 @@ async function getShopifyAccessToken(config) {
     client_secret: config.shopifyClientSecret
   });
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded'
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body
     },
-    body
-  });
+    positiveNumber(config.shopifyRequestTimeoutMs, 5000)
+  );
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -491,6 +525,29 @@ async function getShopifyAccessToken(config) {
   };
 
   return tokenCache.accessToken;
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal || controller.signal
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Shopify request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function compactOrder(order) {

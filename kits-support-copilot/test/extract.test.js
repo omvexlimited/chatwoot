@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extractIdentifiers, normalizeOrderRef, normalizePhoneCandidates } from '../src/extract.js';
-import { buildShopifyQueries, selectOrder } from '../src/shopify.js';
+import { buildShopifyQueries, getShopifyContext, selectOrder } from '../src/shopify.js';
 
 test('extracts emails and explicit order refs', () => {
   const result = extractIdentifiers('My email is Test@Example.com and order #12345 has no tracking.');
@@ -133,6 +133,70 @@ test('builds phone fallback lookup queries without using phone filter syntax', (
   assert.equal(queries.includes('+447950527911 status:closed'), true);
   assert.equal(queries.includes('7950527911'), true);
   assert.equal(queries.some(query => query.startsWith('phone:')), false);
+});
+
+test('runs Shopify lookup queries concurrently for faster context loading', async t => {
+  const originalFetch = globalThis.fetch;
+  let active = 0;
+  let maxActive = 0;
+  let calls = 0;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () => {
+    active += 1;
+    calls += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    active -= 1;
+    return {
+      ok: true,
+      json: async () => ({
+        data: {
+          orders: {
+            nodes: [
+              {
+                id: 'gid://shopify/Order/1',
+                name: '#1001',
+                email: 'test@example.com',
+                createdAt: '2026-07-01T00:00:00Z',
+                displayFinancialStatus: 'PAID',
+                displayFulfillmentStatus: 'UNFULFILLED',
+                currentTotalPriceSet: { shopMoney: { amount: '10.00', currencyCode: 'EUR' } },
+                customer: { email: 'test@example.com', firstName: 'Test', lastName: 'Customer', phone: null },
+                phone: null,
+                shippingAddress: { country: 'Spain', countryCodeV2: 'ES', phone: null },
+                billingAddress: null,
+                lineItems: { nodes: [] },
+                fulfillments: []
+              }
+            ]
+          }
+        }
+      })
+    };
+  };
+
+  const context = await getShopifyContext({
+    config: {
+      shopifyStoreDomain: 'kits-republic.myshopify.com',
+      shopifyAdminAccessToken: 'token',
+      shopifyApiVersion: '2026-04',
+      shopifyQueryConcurrency: 4,
+      shopifyRequestTimeoutMs: 1000
+    },
+    contactEmail: 'test@example.com',
+    contactPhone: '',
+    contactCountryCode: '',
+    text: '',
+    selectedOrderRef: ''
+  });
+
+  assert.equal(context.selected_order.name, '#1001');
+  assert.equal(calls, 4);
+  assert.ok(maxActive > 1);
 });
 
 test('selects order by explicit order ref', () => {
