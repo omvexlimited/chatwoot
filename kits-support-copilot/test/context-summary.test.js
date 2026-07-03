@@ -149,6 +149,31 @@ test('keeps raw context payload for debugging', () => {
   assert.deepEqual(view.rawPayload.warnings, ['Multiple orders matched.']);
 });
 
+test('shows forced support case with automatic detected case', () => {
+  const view = buildContextView(contextResult({
+    supportCase: {
+      type: 'return_request',
+      confidence: 'high',
+      reasons: ['agent_forced_case', 'detected_case:refund_request'],
+      forced: true,
+      detected_type: 'refund_request'
+    },
+    detectedSupportCase: {
+      type: 'refund_request',
+      confidence: 'high',
+      reasons: ['customer_requests_refund']
+    },
+    forcedSupportCase: 'return_request'
+  }));
+  const supportCase = view.cards.find(card => card.title === 'Case');
+
+  assert.equal(view.topBar.case, 'return_request (forced)');
+  assert.equal(supportCase.rows.find(row => row.label === 'Type').value, 'return_request (forced)');
+  assert.equal(supportCase.rows.find(row => row.label === 'Detected automatically').value, 'refund_request');
+  assert.equal(view.rawPayload.forced_support_case, 'return_request');
+  assert.equal(view.rawPayload.detected_support_case.type, 'refund_request');
+});
+
 test('shows open tickets card when issue context has active tickets', () => {
   const view = buildContextView(contextResult({
     issueContext: {
@@ -270,7 +295,14 @@ function contextResult({
     issues: []
   },
   caseReview = null,
-  attachmentAnalysis = null
+  attachmentAnalysis = null,
+  supportCase = {
+    type: 'customs_pending',
+    confidence: 'medium',
+    reasons: ['tracking_present', 'no_in_transit_timestamp']
+  },
+  detectedSupportCase = null,
+  forcedSupportCase = null
 } = {}) {
   return {
     contact_email: 'customer@example.com',
@@ -279,11 +311,9 @@ function contextResult({
       source: 'shipping_country',
       country_code: 'ES'
     },
-    support_case: {
-      type: 'customs_pending',
-      confidence: 'medium',
-      reasons: ['tracking_present', 'no_in_transit_timestamp']
-    },
+    support_case: supportCase,
+    detected_support_case: detectedSupportCase,
+    forced_support_case: forcedSupportCase,
     warnings: ['Multiple orders matched.'],
     context_summary: {
       customer: 'customer@example.com',
@@ -320,7 +350,10 @@ function contextResult({
       attachment_analysis: attachmentAnalysis,
       shipping_country: 'Spain',
       shipping_country_code: 'ES',
-      order_candidates: orderCandidates
+      order_candidates: orderCandidates,
+      support_case: supportCase,
+      detected_support_case: detectedSupportCase,
+      forced_support_case: forcedSupportCase
     },
     provider_tracking_context: providerTracking,
     issue_context: issueContext,

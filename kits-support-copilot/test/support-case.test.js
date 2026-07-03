@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { detectSupportCase } from '../src/support-case.js';
+import { applyForcedSupportCase, detectSupportCase, normalizeSupportCaseType, SUPPORT_CASE_TYPES } from '../src/support-case.js';
 
 test('detects Spain CTT pending receipt as customs pending', () => {
   const supportCase = detectSupportCase({
@@ -210,6 +210,41 @@ test('detects open supplier issue when no stronger customer case is present', ()
   });
 
   assert.equal(supportCase.type, 'supplier_issue_open');
+});
+
+test('normalizes known support case types for forced overrides', () => {
+  assert.ok(SUPPORT_CASE_TYPES.includes('return_request'));
+  assert.equal(normalizeSupportCaseType('return_request'), 'return_request');
+  assert.equal(normalizeSupportCaseType('return request'), '');
+  assert.equal(normalizeSupportCaseType('nonsense'), '');
+});
+
+test('applies forced support case while preserving detected case metadata', () => {
+  const detectedSupportCase = {
+    type: 'refund_request',
+    confidence: 'high',
+    reasons: ['customer_requests_refund']
+  };
+  const supportCase = applyForcedSupportCase({
+    detectedSupportCase,
+    forcedSupportCaseType: 'return_request'
+  });
+
+  assert.equal(supportCase.type, 'return_request');
+  assert.equal(supportCase.confidence, 'high');
+  assert.equal(supportCase.forced, true);
+  assert.equal(supportCase.detected_type, 'refund_request');
+  assert.deepEqual(supportCase.reasons, ['agent_forced_case', 'detected_case:refund_request']);
+});
+
+test('ignores invalid forced support case types', () => {
+  const detectedSupportCase = {
+    type: 'refund_request',
+    confidence: 'high',
+    reasons: ['customer_requests_refund']
+  };
+
+  assert.equal(applyForcedSupportCase({ detectedSupportCase, forcedSupportCaseType: 'nonsense' }), detectedSupportCase);
 });
 
 function shopifyContext({

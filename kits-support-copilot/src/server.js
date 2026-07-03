@@ -17,7 +17,7 @@ import { getProviderTrackingContext } from './provider-tracking.js';
 import { getDeliveryEstimateContext } from './delivery-estimates.js';
 import { getIssueContext } from './issue-lookup.js';
 import { applyAgentDraftLanguageOverride, detectLanguageFromText, inferResponseLanguage } from './language.js';
-import { detectSupportCase } from './support-case.js';
+import { applyForcedSupportCase, detectSupportCase, normalizeSupportCaseType } from './support-case.js';
 import { enforceDraftRequirements } from './draft-rules.js';
 import { buildPublicTrackingUrl } from './tracking-url.js';
 import { extractAgentConfirmedFacts } from './agent-facts.js';
@@ -812,7 +812,7 @@ async function prepareConversationContext(body) {
     ...(duplicateContext?.warnings || [])
   ]);
   const responseLanguage = inferResponseLanguage({ latestMessage, shopifyContext });
-  const supportCase = detectSupportCase({
+  const detectedSupportCase = detectSupportCase({
     latestMessage,
     conversationText,
     shopifyContext,
@@ -820,6 +820,15 @@ async function prepareConversationContext(body) {
     issueContext,
     attachmentAnalysis,
     duplicateContext
+  });
+  const requestedForcedSupportCase = String(body.forced_support_case || '').trim();
+  const forcedSupportCaseType = normalizeSupportCaseType(requestedForcedSupportCase);
+  if (requestedForcedSupportCase && !forcedSupportCaseType) {
+    warnings.push(`Invalid forced support case ignored: ${requestedForcedSupportCase}`);
+  }
+  const supportCase = applyForcedSupportCase({
+    detectedSupportCase,
+    forcedSupportCaseType
   });
   const caseReview = buildCaseReview({
     supportCase,
@@ -851,6 +860,8 @@ async function prepareConversationContext(body) {
     duplicateContext,
     responseLanguage,
     supportCase,
+    detectedSupportCase,
+    forcedSupportCase: forcedSupportCaseType || null,
     caseReview,
     warnings
   };
@@ -1162,6 +1173,8 @@ function contextPayload(context) {
     chatwoot_available: context.chatwootAvailable,
     response_language: context.responseLanguage,
     support_case: context.supportCase,
+    detected_support_case: context.detectedSupportCase,
+    forced_support_case: context.forcedSupportCase,
     provider_context: context.providerContext,
     provider_tracking_context: context.providerTrackingContext,
     delivery_estimate_context: context.deliveryEstimateContext,
@@ -1193,7 +1206,9 @@ function summarizeContext(context) {
       duplicate_context: context.duplicateContext,
       case_review: context.caseReview,
       response_language: context.responseLanguage,
-      support_case: context.supportCase
+      support_case: context.supportCase,
+      detected_support_case: context.detectedSupportCase,
+      forced_support_case: context.forcedSupportCase
     };
   }
 
@@ -1230,7 +1245,9 @@ function summarizeContext(context) {
     shipping_country: order.shipping_address?.country || null,
     shipping_country_code: order.shipping_address?.country_code || null,
     response_language: context.responseLanguage,
-    support_case: context.supportCase
+    support_case: context.supportCase,
+    detected_support_case: context.detectedSupportCase,
+    forced_support_case: context.forcedSupportCase
   };
 }
 

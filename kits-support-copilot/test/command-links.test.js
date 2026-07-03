@@ -43,3 +43,11 @@ test('segments order link commands', () => {
 
   assert.deepEqual(commands, ['/linkorder #2280', '/unlinkorder']);
 });
+
+test('segments case override commands', () => {
+  const commands = segmentCommandLinks('Use /case return_request to force it, or /case clear to restore auto detection.')
+    .filter(segment => segment.type === 'command')
+    .map(segment => segment.text);
+
+  assert.deepEqual(commands, ['/case return_request', '/case clear']);
+});

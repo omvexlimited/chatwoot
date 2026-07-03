@@ -1,3 +1,19 @@
+export const SUPPORT_CASE_TYPES = [
+  'duplicate_thread',
+  'invoice_request',
+  'wrong_item',
+  'product_mismatch',
+  'size_issue',
+  'refund_request',
+  'return_request',
+  'supplier_issue_open',
+  'delivered_not_found',
+  'failed_delivery_attempt',
+  'customs_pending'
+];
+
+const SUPPORT_CASE_TYPE_SET = new Set(SUPPORT_CASE_TYPES);
+
 export const COPILOT_COMMANDS = [
   {
     command: '/remember <text>',
@@ -45,6 +61,22 @@ export const COPILOT_COMMANDS = [
     command: '/unlinkorder',
     description: 'Remove the manual order override.',
     keywords: ['order', 'shopify', 'context']
+  },
+  {
+    command: '/case <case_type>',
+    description: 'Force the support case for this conversation.',
+    keywords: ['case', 'intent', 'override', ...SUPPORT_CASE_TYPES],
+    linkVariants: ['/case']
+  },
+  ...SUPPORT_CASE_TYPES.map(type => ({
+    command: `/case ${type}`,
+    description: `Force the support case to ${type}.`,
+    keywords: ['case', 'intent', 'override', type]
+  })),
+  {
+    command: '/case clear',
+    description: 'Return to automatic case detection.',
+    keywords: ['case', 'intent', 'override', 'auto', 'clear']
   },
   {
     command: '/grammar',
@@ -129,6 +161,25 @@ export function parseOrderLinkCommand(value = '') {
   };
 }
 
+export function parseCaseOverrideCommand(value = '') {
+  const content = String(value || '').trim();
+  const match = content.match(/^\/case(?:\s+(.+))?$/i);
+  if (!match) return null;
+
+  const argument = normalizeSupportCaseTypeInput(match[1] || '');
+  if (!argument) {
+    return { name: 'case', action: 'usage', caseType: '', validTypes: SUPPORT_CASE_TYPES };
+  }
+  if (argument === 'clear' || argument === 'auto') {
+    return { name: 'case', action: 'clear', caseType: '', validTypes: SUPPORT_CASE_TYPES };
+  }
+  if (!SUPPORT_CASE_TYPE_SET.has(argument)) {
+    return { name: 'case', action: 'invalid', caseType: argument, validTypes: SUPPORT_CASE_TYPES };
+  }
+
+  return { name: 'case', action: 'set', caseType: argument, validTypes: SUPPORT_CASE_TYPES };
+}
+
 export function shouldReadComposerForAgentMessage(value = '') {
   const content = String(value || '').trim();
   if (!content) return false;
@@ -159,6 +210,10 @@ export function linkableCommandTexts() {
 
 function normalizeQuery(value = '') {
   return String(value || '').trim().replace(/^\/+/, '').toLowerCase();
+}
+
+function normalizeSupportCaseTypeInput(value = '') {
+  return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
 function normalizeOrderRef(value = '') {

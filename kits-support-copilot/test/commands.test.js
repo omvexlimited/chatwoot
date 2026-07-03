@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   filterCommandOptions,
   getActiveSlashToken,
+  parseCaseOverrideCommand,
   parseOrderLinkCommand,
   replaceActiveSlashToken,
   shouldReadComposerForAgentMessage
@@ -20,9 +21,18 @@ test('returns all commands for empty slash query', () => {
   assert.ok(commands.includes('/remember <text>'));
   assert.ok(commands.includes('/linkorder <order>'));
   assert.ok(commands.includes('/unlinkorder'));
+  assert.ok(commands.includes('/case <case_type>'));
+  assert.ok(commands.includes('/case return_request'));
+  assert.ok(commands.includes('/case clear'));
   assert.ok(commands.includes('/grammar'));
   assert.ok(commands.includes('/brief'));
   assert.ok(commands.includes('/help'));
+});
+
+test('filters case override commands by slash query', () => {
+  const commands = filterCommandOptions('/case return').map(option => option.command);
+
+  assert.deepEqual(commands, ['/case return_request']);
 });
 
 test('filters order link commands by slash query', () => {
@@ -99,6 +109,42 @@ test('parses missing order in local order link command', () => {
   });
 });
 
+test('parses local case override commands', () => {
+  assert.deepEqual(parseCaseOverrideCommand('/case return_request'), {
+    name: 'case',
+    action: 'set',
+    caseType: 'return_request',
+    validTypes: parseCaseOverrideCommand('/case').validTypes
+  });
+  assert.deepEqual(parseCaseOverrideCommand('/case refund request'), {
+    name: 'case',
+    action: 'set',
+    caseType: 'refund_request',
+    validTypes: parseCaseOverrideCommand('/case').validTypes
+  });
+  assert.deepEqual(parseCaseOverrideCommand('/case clear'), {
+    name: 'case',
+    action: 'clear',
+    caseType: '',
+    validTypes: parseCaseOverrideCommand('/case').validTypes
+  });
+  assert.deepEqual(parseCaseOverrideCommand('/case auto'), {
+    name: 'case',
+    action: 'clear',
+    caseType: '',
+    validTypes: parseCaseOverrideCommand('/case').validTypes
+  });
+  assert.equal(parseCaseOverrideCommand('/help'), null);
+});
+
+test('rejects unknown local case override commands', () => {
+  const result = parseCaseOverrideCommand('/case nonsense');
+
+  assert.equal(result.action, 'invalid');
+  assert.equal(result.caseType, 'nonsense');
+  assert.ok(result.validTypes.includes('return_request'));
+});
+
 test('reads Chatwoot composer for draft-like agent instructions', () => {
   assert.equal(shouldReadComposerForAgentMessage('/grammar'), true);
   assert.equal(shouldReadComposerForAgentMessage('ofrécele un 20% de descuento para próximas compras'), true);
@@ -109,6 +155,7 @@ test('reads Chatwoot composer for draft-like agent instructions', () => {
 
 test('does not read Chatwoot composer for utility commands or internal questions', () => {
   assert.equal(shouldReadComposerForAgentMessage('/brief'), false);
+  assert.equal(shouldReadComposerForAgentMessage('/case return_request'), false);
   assert.equal(shouldReadComposerForAgentMessage('/newticket'), false);
   assert.equal(shouldReadComposerForAgentMessage('/remember test'), false);
   assert.equal(shouldReadComposerForAgentMessage('quiere refund de las 2 orders?'), false);

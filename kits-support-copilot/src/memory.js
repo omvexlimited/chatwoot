@@ -28,6 +28,12 @@ const HELP_TEXT = [
   '/unlinkorder',
   'Remove the manually linked order and return to automatic matching.',
   '',
+  '/case <case_type>',
+  'Force the copilot support case for this conversation. Example: /case return_request',
+  '',
+  '/case clear',
+  'Return this conversation to automatic case detection.',
+  '',
   '/grammar',
   'Correct spelling in the current draft only, without rewriting it.',
   '',
@@ -97,6 +103,9 @@ export function parseCopilotCommand(value = '') {
   if (command === '/unlinkorder') {
     return { name: 'unlinkorder', argument };
   }
+  if (command === '/case') {
+    return { name: 'case', argument };
+  }
   if (command === '/help') {
     return { name: 'help', argument };
   }
@@ -123,7 +132,7 @@ export async function runMemoryCommand({ command, config, context, agentEmail, s
   if (command.name === 'brief') {
     return null;
   }
-  if (command.name === 'linkorder' || command.name === 'unlinkorder') {
+  if (command.name === 'linkorder' || command.name === 'unlinkorder' || command.name === 'case') {
     return commandResponse('This command is handled in the copilot browser UI. Refresh Chatwoot and try again if it did not update the context.');
   }
 

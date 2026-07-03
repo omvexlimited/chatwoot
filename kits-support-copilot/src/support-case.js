@@ -145,6 +145,43 @@ const DUPLICATE_PATTERNS = [
   /ya le respondimos/i
 ];
 
+export const SUPPORT_CASE_TYPES = [
+  'duplicate_thread',
+  'invoice_request',
+  'wrong_item',
+  'product_mismatch',
+  'size_issue',
+  'refund_request',
+  'return_request',
+  'supplier_issue_open',
+  'delivered_not_found',
+  'failed_delivery_attempt',
+  'customs_pending'
+];
+
+const SUPPORT_CASE_TYPE_SET = new Set(SUPPORT_CASE_TYPES);
+
+export function normalizeSupportCaseType(value = '') {
+  const clean = String(value || '').trim().toLowerCase();
+  return SUPPORT_CASE_TYPE_SET.has(clean) ? clean : '';
+}
+
+export function applyForcedSupportCase({ detectedSupportCase = null, forcedSupportCaseType = '' } = {}) {
+  const type = normalizeSupportCaseType(forcedSupportCaseType);
+  if (!type) return detectedSupportCase || null;
+
+  return {
+    type,
+    confidence: 'high',
+    reasons: [
+      'agent_forced_case',
+      detectedSupportCase?.type ? `detected_case:${detectedSupportCase.type}` : 'detected_case:none'
+    ],
+    forced: true,
+    detected_type: detectedSupportCase?.type || null
+  };
+}
+
 export function detectSupportCase({
   latestMessage = '',
   conversationText = '',

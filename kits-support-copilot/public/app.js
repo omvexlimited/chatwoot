@@ -9,6 +9,7 @@ import { segmentCommandLinks } from './command-links.js';
 import {
   filterCommandOptions,
   getActiveSlashToken,
+  parseCaseOverrideCommand,
   parseOrderLinkCommand,
   replaceActiveSlashToken,
   shouldReadComposerForAgentMessage
@@ -31,6 +32,7 @@ const state = {
   lastResult: null,
   pendingIssue: null,
   selectedOrderRef: '',
+  forcedSupportCase: '',
   commandMenu: {
     activeIndex: 0,
     options: [],
@@ -166,6 +168,7 @@ function hydrateFromContext() {
     state.lastResult = session.lastResult;
     state.pendingIssue = session.pendingIssue;
     state.selectedOrderRef = session.selectedOrderRef;
+    state.forcedSupportCase = session.forcedSupportCase;
     els.draft.value = session.draft;
     els.confidence.textContent = `confidence: ${session.lastResult?.confidence || 'n/a'}`;
     hideInsertNotice();
@@ -204,6 +207,7 @@ function clearStoredSession() {
     lastResult: null,
     pendingIssue: null,
     selectedOrderRef: '',
+    forcedSupportCase: '',
     updatedAt: null
   };
 }
@@ -245,6 +249,7 @@ async function loadContext({ skipLazyDraft = false } = {}) {
 
 async function loadPreparedDraft({ pollAttempt = 0 } = {}) {
   if (!isSidebarLayout) return;
+  if (state.forcedSupportCase) return;
 
   const payload = buildBasePayload();
   if (!payload.conversation_id) return;
@@ -424,6 +429,11 @@ async function sendAgentMessage(rawMessage) {
   renderChat();
   persistSession();
 
+  if (await handleCaseOverrideCommand(content)) {
+    updateButtons();
+    return;
+  }
+
   if (await handleOrderLinkCommand(content)) {
     updateButtons();
     return;
@@ -544,6 +554,89 @@ async function handleOrderLinkCommand(content) {
   return true;
 }
 
+async function handleCaseOverrideCommand(content) {
+  const command = parseCaseOverrideCommand(content);
+  if (!command) return false;
+
+  if (command.action === 'usage') {
+    state.chatMessages.push({
+      role: 'assistant',
+      content: [
+        'Usage: /case <case_type>. Example: /case return_request',
+        '',
+        `Valid cases: ${command.validTypes.join(', ')}`
+      ].join('\n')
+    });
+    renderChat();
+    persistSession();
+    return true;
+  }
+
+  if (command.action === 'invalid') {
+    state.chatMessages.push({
+      role: 'assistant',
+      content: [
+        `Unknown case: ${command.caseType}`,
+        '',
+        `Valid cases: ${command.validTypes.join(', ')}`
+      ].join('\n')
+    });
+    renderChat();
+    persistSession();
+    return true;
+  }
+
+  if (command.action === 'clear') {
+    state.forcedSupportCase = '';
+    invalidateContextForCaseOverride();
+    state.chatMessages = [{ role: 'user', content }];
+    renderChat();
+    persistSession();
+    setStatus('Case auto');
+    const result = await loadContext({ skipLazyDraft: true });
+    rememberContextResult(result);
+    state.chatMessages = [
+      { role: 'user', content },
+      {
+        role: 'assistant',
+        content: result
+          ? 'Manual case override cleared. Context reloaded with automatic detection.'
+          : 'Manual case override cleared, but context reload failed.'
+      }
+    ];
+    renderChat();
+    persistSession();
+    return true;
+  }
+
+  state.forcedSupportCase = command.caseType;
+  invalidateContextForCaseOverride();
+  state.chatMessages = [{ role: 'user', content }];
+  renderChat();
+  persistSession();
+  setStatus(`Forcing ${command.caseType}...`);
+
+  const result = await loadContext({ skipLazyDraft: true });
+  rememberContextResult(result);
+  const detectedType = result?.detected_support_case?.type || result?.context_summary?.detected_support_case?.type || '';
+  const detectedLine = detectedType && detectedType !== command.caseType
+    ? ` Detected automatically: ${detectedType}.`
+    : '';
+  state.chatMessages = [
+    { role: 'user', content },
+    {
+      role: 'assistant',
+      content: result
+        ? `Forced case set to ${command.caseType}.${detectedLine} Context reloaded. Use /case clear to return to automatic detection.`
+        : `Forced case set to ${command.caseType}, but context reload failed. Use /case clear to return to automatic detection.`
+    }
+  ];
+  renderChat();
+  persistSession();
+  setStatus(result ? 'Case forced' : 'Context error');
+  return true;
+}
+
 function rememberContextResult(result) {
   if (!result) return;
   state.lastResult = {
@@ -552,8 +645,24 @@ function rememberContextResult(result) {
     context_summary: result.context_summary,
     shopify_context: result.shopify_context,
     response_language: result.response_language,
+    support_case: result.support_case,
+    detected_support_case: result.detected_support_case,
+    forced_support_case: result.forced_support_case,
     warnings: result.warnings
   };
+}
+
+function invalidateContextForCaseOverride() {
+  state.lastResult = null;
+  state.pendingIssue = null;
+  state.contextResult = null;
+  state.lazyDraftStartedFor = '';
+  state.appliedPreparedDraftKey = '';
+  state.preparedDraftLookupPending = false;
+  state.contextRequestId += 1;
+  state.chatRequestId += 1;
+  state.preparedDraftRequestId += 1;
+  hideInsertNotice();
 }
 
 function resetConversationDraftState({ selectedOrderRef }) {
@@ -782,6 +891,7 @@ function buildBasePayload() {
     conversation_id: conversation.display_id || conversation.id,
     conversation_display_id: conversation.display_id,
     selected_order_ref: state.selectedOrderRef,
+    forced_support_case: state.forcedSupportCase,
     contact_email: contact.email,
     contact_phone: contact.phone_number || contact.phone || contact.additional_attributes?.phone_number || contact.additional_attributes?.phone,
     country_code: contact.country_code || contact.additional_attributes?.country_code || contact.additional_attributes?.country,
@@ -1259,6 +1369,7 @@ function persistSession() {
     lastResult: state.lastResult,
     pendingIssue: state.pendingIssue,
     selectedOrderRef: state.selectedOrderRef,
+    forcedSupportCase: state.forcedSupportCase,
     updatedAt: new Date().toISOString()
   });
 }

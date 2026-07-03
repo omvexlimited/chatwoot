@@ -14,6 +14,19 @@ const CONTEXT_SUMMARY_KEYS = [
   'response_language',
   'support_case'
 ];
+const SUPPORT_CASE_TYPES = new Set([
+  'duplicate_thread',
+  'invoice_request',
+  'wrong_item',
+  'product_mismatch',
+  'size_issue',
+  'refund_request',
+  'return_request',
+  'supplier_issue_open',
+  'delivered_not_found',
+  'failed_delivery_attempt',
+  'customs_pending'
+]);
 
 export function createStorageKey({ accountId, conversationId }) {
   if (!accountId || !conversationId) return '';
@@ -51,6 +64,7 @@ export function normalizeSession(session = {}) {
     draft: String(session.draft || ''),
     lastResult: normalizeLastResult(session.lastResult),
     selectedOrderRef: normalizeOrderRef(session.selectedOrderRef),
+    forcedSupportCase: normalizeSupportCaseType(session.forcedSupportCase),
     pendingIssue: normalizePendingIssue(session.pendingIssue),
     updatedAt: session.updatedAt || new Date().toISOString()
   };
@@ -62,6 +76,7 @@ function emptySession() {
     draft: '',
     lastResult: null,
     selectedOrderRef: '',
+    forcedSupportCase: '',
     pendingIssue: null,
     updatedAt: null
   };
@@ -70,6 +85,11 @@ function emptySession() {
 function normalizeOrderRef(value = '') {
   const clean = String(value || '').trim().replace(/^#?/, '');
   return clean ? `#${clean}` : '';
+}
+
+function normalizeSupportCaseType(value = '') {
+  const clean = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return SUPPORT_CASE_TYPES.has(clean) ? clean : '';
 }
 
 function normalizeMessages(messages) {
@@ -169,6 +189,7 @@ function minimalSession(session) {
     draft: session.draft || '',
     lastResult: null,
     selectedOrderRef: session.selectedOrderRef || '',
+    forcedSupportCase: session.forcedSupportCase || '',
     pendingIssue: null,
     updatedAt: session.updatedAt || new Date().toISOString()
   };

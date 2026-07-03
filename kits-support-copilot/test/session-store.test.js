@@ -42,6 +42,7 @@ test('persists normalized chat session data', () => {
       warnings: ['first', 'second', 'third', 'fourth', 'fifth', 'sixth']
     },
     selectedOrderRef: '2222',
+    forcedSupportCase: 'return_request',
     pendingIssue: {
       order_ref: '2222',
       provider_id: '4',
@@ -70,6 +71,7 @@ test('persists normalized chat session data', () => {
       }
     },
     selectedOrderRef: '#2222',
+    forcedSupportCase: 'return_request',
     pendingIssue: {
       order_ref: '#2222',
       provider_id: 4,
@@ -87,7 +89,23 @@ test('persists normalized chat session data', () => {
   clearSession(storage, key);
   assert.equal(loadSession(storage, key).draft, '');
   assert.equal(loadSession(storage, key).selectedOrderRef, '');
+  assert.equal(loadSession(storage, key).forcedSupportCase, '');
   assert.equal(loadSession(storage, key).pendingIssue, null);
+});
+
+test('normalizes forced support case in stored sessions', () => {
+  const storage = new MemoryStorage();
+  const key = createStorageKey({ accountId: 1, conversationId: 42 });
+
+  saveSession(storage, key, {
+    forcedSupportCase: 'refund request'
+  });
+  assert.equal(loadSession(storage, key).forcedSupportCase, 'refund_request');
+
+  saveSession(storage, key, {
+    forcedSupportCase: 'unknown_case'
+  });
+  assert.equal(loadSession(storage, key).forcedSupportCase, '');
 });
 
 test('limits stored chat messages to the latest 20', () => {

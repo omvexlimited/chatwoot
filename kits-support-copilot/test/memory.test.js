@@ -23,6 +23,8 @@ test('parses copilot memory commands', () => {
   });
   assert.deepEqual(parseCopilotCommand('/linkorder #2280'), { name: 'linkorder', argument: '#2280' });
   assert.deepEqual(parseCopilotCommand('/unlinkorder'), { name: 'unlinkorder', argument: '' });
+  assert.deepEqual(parseCopilotCommand('/case return_request'), { name: 'case', argument: 'return_request' });
+  assert.deepEqual(parseCopilotCommand('/case clear'), { name: 'case', argument: 'clear' });
   assert.deepEqual(parseCopilotCommand('/grammar'), { name: 'grammar', argument: '' });
   assert.deepEqual(parseCopilotCommand('/brief'), { name: 'brief', argument: '' });
   assert.deepEqual(parseCopilotCommand('/help'), { name: 'help', argument: '' });
@@ -83,6 +85,8 @@ test('runs /help without memory database configuration', async () => {
   assert.match(result.assistant_message, /\/remember <text>/);
   assert.match(result.assistant_message, /\/memories/);
   assert.match(result.assistant_message, /\/forget <id>/);
+  assert.match(result.assistant_message, /\/case <case_type>/);
+  assert.match(result.assistant_message, /\/case clear/);
   assert.match(result.assistant_message, /\/grammar/);
   assert.match(result.assistant_message, /\/brief/);
   assert.match(result.assistant_message, /\/help/);

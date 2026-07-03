@@ -4,6 +4,7 @@ export function buildContextView(result = {}) {
   const summary = result.context_summary || {};
   const warnings = Array.isArray(result.warnings) ? result.warnings.map(String).filter(Boolean) : [];
   const supportCase = result.support_case || summary.support_case || null;
+  const detectedSupportCase = result.detected_support_case || summary.detected_support_case || null;
   const responseLanguage = result.response_language || summary.response_language || {};
   const orderDate = formatContextDate(summary.order_created_at || order?.created_at);
   const fulfillmentDate = formatContextDate(summary.fulfillment_created_at || orderFulfillment(order)?.created_at);
@@ -28,7 +29,7 @@ export function buildContextView(result = {}) {
       order: orderName
         ? [orderName, orderDate, fulfillmentStatus].filter(Boolean).join(' | ')
         : 'No order selected',
-      case: supportCase?.type || '-',
+      case: formatCaseType(supportCase),
       warnings: String(warnings.length)
     },
     cards: [
@@ -38,7 +39,7 @@ export function buildContextView(result = {}) {
       itemsCard(lineItems),
       ordersCard(orderCandidates),
       trackingCard({ trackingCarrier, trackingNumber, trackingUrl, summary, deliveryEstimate, providerTracking }),
-      caseCard(supportCase),
+      caseCard({ supportCase, detectedSupportCase }),
       caseReviewCard(caseReview),
       attachmentAnalysisCard(attachmentAnalysis),
       warningsCard(warnings)
@@ -46,6 +47,8 @@ export function buildContextView(result = {}) {
     rawPayload: {
       context_summary: summary,
       support_case: supportCase,
+      detected_support_case: detectedSupportCase,
+      forced_support_case: result.forced_support_case || summary.forced_support_case || null,
       provider_tracking_context: providerTracking,
       delivery_estimate_context: deliveryEstimate,
       issue_context: issueContext,
@@ -211,14 +214,22 @@ function ordersCard(orderCandidates) {
   };
 }
 
-function caseCard(supportCase) {
+function caseCard({ supportCase, detectedSupportCase } = {}) {
+  const rows = [
+    { label: 'Type', value: formatCaseType(supportCase) },
+    { label: 'Confidence', value: supportCase?.confidence || '-' },
+    { label: 'Reasons', value: formatReasons(supportCase?.reasons) }
+  ];
+  if (supportCase?.forced) {
+    rows.splice(1, 0, {
+      label: 'Detected automatically',
+      value: detectedSupportCase?.type || supportCase.detected_type || '-'
+    });
+  }
+
   return {
     title: 'Case',
-    rows: [
-      { label: 'Type', value: supportCase?.type || '-' },
-      { label: 'Confidence', value: supportCase?.confidence || '-' },
-      { label: 'Reasons', value: formatReasons(supportCase?.reasons) }
-    ],
+    rows,
     emphasis: Boolean(supportCase?.type)
   };
 }
@@ -351,6 +362,11 @@ function formatCountry(country, code) {
 function formatLanguage(responseLanguage) {
   if (!responseLanguage?.language) return '-';
   return [responseLanguage.language, responseLanguage.source].filter(Boolean).join(' | ');
+}
+
+function formatCaseType(supportCase) {
+  if (!supportCase?.type) return '-';
+  return supportCase.forced ? `${supportCase.type} (forced)` : supportCase.type;
 }
 
 function formatReasons(reasons) {
