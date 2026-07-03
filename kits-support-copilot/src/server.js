@@ -21,6 +21,7 @@ import { detectSupportCase } from './support-case.js';
 import { enforceDraftRequirements } from './draft-rules.js';
 import { buildPublicTrackingUrl } from './tracking-url.js';
 import { extractAgentConfirmedFacts } from './agent-facts.js';
+import { extractAttachmentCandidates } from './attachment-candidates.js';
 import {
   ensureMemoryTable,
   formatPromptMemories,
@@ -570,6 +571,7 @@ async function prepareConversationContext(body) {
   }));
 
   const messages = chatwootResult.messages.length ? chatwootResult.messages : fallbackMessages;
+  const attachmentCandidates = extractAttachmentCandidates(messages);
   const fallbackLatestMessage = prependSubjectToText(body.latest_message || '', body.latest_subject || '');
   const chatwootLatestMessage = latestIncomingMessage(messages);
   const latestMessage = chatwootLatestMessage
@@ -661,6 +663,7 @@ async function prepareConversationContext(body) {
     latestMessage,
     conversationText,
     messageCount: messages.length,
+    attachmentCandidates,
     chatwootAvailable: Boolean(chatwootResult.available),
     shopifyContext,
     providerContext,
@@ -879,6 +882,7 @@ function contextPayload(context) {
     provider_tracking_context: context.providerTrackingContext,
     delivery_estimate_context: context.deliveryEstimateContext,
     issue_context: context.issueContext,
+    attachment_candidates: context.attachmentCandidates,
     shopify_context: context.shopifyContext,
     context_summary: summarizeContext(context),
     warnings: context.warnings
@@ -897,6 +901,7 @@ function summarizeContext(context) {
       provider_tracking_context: null,
       delivery_estimate_context: null,
       issue_context: context.issueContext,
+      attachment_candidates: summarizeAttachmentCandidates(context.attachmentCandidates),
       response_language: context.responseLanguage,
       support_case: context.supportCase
     };
@@ -928,6 +933,7 @@ function summarizeContext(context) {
     provider_tracking_context: context.providerTrackingContext,
     delivery_estimate_context: context.deliveryEstimateContext,
     issue_context: context.issueContext,
+    attachment_candidates: summarizeAttachmentCandidates(context.attachmentCandidates),
     shipping_country: order.shipping_address?.country || null,
     shipping_country_code: order.shipping_address?.country_code || null,
     response_language: context.responseLanguage,
@@ -944,6 +950,19 @@ function summarizeLineItems(lineItems = []) {
     sku: item.sku || null,
     fulfillment_status: item.fulfillment_status || null,
     custom_attributes: summarizeCustomAttributes(item.custom_attributes)
+  }));
+}
+
+function summarizeAttachmentCandidates(attachments = []) {
+  return (Array.isArray(attachments) ? attachments : []).slice(0, 5).map(attachment => ({
+    id: attachment.id || null,
+    filename: attachment.filename || null,
+    content_type: attachment.content_type || null,
+    file_size: attachment.file_size || null,
+    width: attachment.width || null,
+    height: attachment.height || null,
+    message_id: attachment.message_id || null,
+    created_at: attachment.created_at || null
   }));
 }
 
