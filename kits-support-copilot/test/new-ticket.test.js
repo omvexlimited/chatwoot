@@ -246,6 +246,7 @@ test('approves pending ticket through internal admin API', async t => {
       kitsAdminBaseUrl: 'https://admin.example.com',
       kitsInternalApiToken: 'secret'
     },
+    agentEmail: 'johnfelixlontok@gmail.com',
     context: context(),
     pendingIssue: {
       order_ref: '#2590',
@@ -264,7 +265,8 @@ test('approves pending ticket through internal admin API', async t => {
     order_ref: '#2590',
     provider_id: 7,
     issue_type: 'stock',
-    message: 'Stock issue for order #2590: no stock'
+    message: 'Stock issue for order #2590: no stock',
+    agent_email: 'johnfelixlontok@gmail.com'
   });
 });
 
@@ -334,6 +336,7 @@ test('approves pending ticket with image attachments through multipart API', asy
       chatwootBaseUrl: 'https://chatwoot.example.com',
       chatwootApiToken: 'chatwoot-secret'
     },
+    agentEmail: 'johnfelixlontok@gmail.com',
     context: context(),
     pendingIssue: {
       order_ref: '#2590',
@@ -358,6 +361,7 @@ test('approves pending ticket with image attachments through multipart API', asy
   assert.equal(calls[1].url, 'https://admin.example.com/internal/kits-republic/issues');
   assert.equal(calls[1].options.headers.Authorization, 'Bearer secret');
   assert.equal(calls[1].options.body instanceof FormData, true);
+  assert.equal(calls[1].options.body.get('agent_email'), 'johnfelixlontok@gmail.com');
   assert.match(result.assistant_message, /Attachments: 1 image\(s\)/);
 });
 

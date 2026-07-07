@@ -17,7 +17,7 @@ const OPENAI_TIMEOUT_MS = 20000;
 const MAX_ISSUE_ATTACHMENTS = 5;
 const EVIDENCE_ISSUE_TYPES = new Set(['customization', 'damaged', 'wrong_item_size', 'missing_item', 'missing_size', 'replacement']);
 
-export async function runNewTicketCommand({ command, config, context, pendingIssue } = {}) {
+export async function runNewTicketCommand({ command, config, context, pendingIssue, agentEmail } = {}) {
   if (!command || command.name !== 'newticket') return null;
 
   const argument = String(command.argument || '').trim();
@@ -26,7 +26,7 @@ export async function runNewTicketCommand({ command, config, context, pendingIss
     return ticketResponse('New ticket proposal cancelled.', { pendingIssue: null });
   }
   if (action === 'approve') {
-    return approvePendingIssue({ config, pendingIssue });
+    return approvePendingIssue({ config, pendingIssue, agentEmail });
   }
 
   const validation = validateTicketContext(context);
@@ -224,7 +224,7 @@ function reviseIssueProposal({ proposal, feedback, context }) {
   };
 }
 
-async function approvePendingIssue({ config, pendingIssue }) {
+async function approvePendingIssue({ config, pendingIssue, agentEmail }) {
   const proposal = normalizePendingIssue(pendingIssue);
   if (!proposal) {
     return ticketResponse('No pending ticket proposal. Use /newticket first to generate a proposal from the current context.', {
@@ -256,6 +256,10 @@ async function approvePendingIssue({ config, pendingIssue }) {
     issue_type: proposal.issue_type,
     message: proposal.message
   };
+  const cleanAgentEmail = sanitizeAgentEmail(agentEmail);
+  if (cleanAgentEmail) {
+    payload.agent_email = cleanAgentEmail;
+  }
   if (proposal.affected_line_item_ids.length) {
     payload.affected_line_item_ids = proposal.affected_line_item_ids;
   }
@@ -317,6 +321,9 @@ async function buildIssueCreateRequest({ config, proposal, payload }) {
   formData.append('issue_type', payload.issue_type);
   formData.append('message', payload.message);
   formData.append('reporter_type', 'customer');
+  if (payload.agent_email) {
+    formData.append('agent_email', payload.agent_email);
+  }
   for (const lineItemId of proposal.affected_line_item_ids || []) {
     formData.append('affected_line_item_ids[]', lineItemId);
   }
@@ -331,6 +338,13 @@ async function buildIssueCreateRequest({ config, proposal, payload }) {
       body: formData
     }
   };
+}
+
+function sanitizeAgentEmail(value) {
+  const email = String(value || '').trim();
+  if (!email || email.length > 254) return '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return '';
+  return email;
 }
 
 async function requestIssueProposal({ config, prompt, fallback }) {

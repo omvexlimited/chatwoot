@@ -272,7 +272,8 @@ async function handleCopilotChat(req, res) {
     command,
     config,
     context: responseContext,
-    pendingIssue
+    pendingIssue,
+    agentEmail: body.agent_email
   }) || (!command && pendingIssue ? await runPendingTicketFeedback({
     message: latestUserMessage,
     pendingIssue,
