@@ -14,6 +14,7 @@ import {
   replaceActiveSlashToken,
   shouldReadComposerForAgentMessage
 } from './commands.js';
+import { resolveStatusPresentation } from './status-label.js';
 
 const SIDEBAR_SPLIT_STORAGE_KEY = 'kr-copilot-sidebar-split-v1';
 const SIDEBAR_SPLIT_LIMITS = {
@@ -1512,7 +1513,15 @@ function setDraftStatus(text) {
 }
 
 function renderStatus() {
-  els.status.textContent = [state.statusText, state.draftStatusText].filter(Boolean).join(' | ');
+  const presentation = resolveStatusPresentation({
+    statusText: state.statusText,
+    draftStatusText: state.draftStatusText,
+    compact: isSidebarLayout
+  });
+  els.status.textContent = presentation.label;
+  els.status.dataset.tone = presentation.tone;
+  els.status.title = presentation.fullLabel;
+  els.status.setAttribute('aria-label', presentation.fullLabel);
 }
 
 function wait(ms) {
