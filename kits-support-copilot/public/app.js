@@ -47,7 +47,9 @@ const state = {
   preparedDraftRequestId: 0,
   preparedDraftLookupPending: false,
   appliedPreparedDraftKey: '',
-  lazyDraftStartedFor: ''
+  lazyDraftStartedFor: '',
+  statusText: 'Idle',
+  draftStatusText: ''
 };
 
 const layout = new URLSearchParams(window.location.search).get('layout') || 'default';
@@ -158,21 +160,27 @@ function hydrateFromContext() {
     state.contextRequestId += 1;
     state.chatRequestId += 1;
     state.preparedDraftRequestId += 1;
-    state.contextResult = null;
     state.appliedPreparedDraftKey = '';
     state.lazyDraftStartedFor = '';
     state.preparedDraftLookupPending = false;
+    state.draftStatusText = '';
     let session = loadSession(window.localStorage, state.storageKey);
     session = sessionBelongsToContact(session, contact) ? session : clearStoredSession();
     state.chatMessages = session.chatMessages;
     state.lastResult = session.lastResult;
+    state.contextResult = session.lastResult?.context_summary
+      ? {
+          contact_email: session.lastResult.contact_email,
+          context_summary: session.lastResult.context_summary,
+          warnings: session.lastResult.warnings || []
+        }
+      : null;
     state.pendingIssue = session.pendingIssue;
     state.selectedOrderRef = session.selectedOrderRef;
     state.forcedSupportCase = session.forcedSupportCase;
     els.draft.value = session.draft;
     els.confidence.textContent = `confidence: ${session.lastResult?.confidence || 'n/a'}`;
     hideInsertNotice();
-    clearContextView();
   }
 
   els.conversationLabel.textContent = conversationId
@@ -180,6 +188,8 @@ function hydrateFromContext() {
     : 'No Chatwoot conversation context.';
 
   renderChat();
+  if (state.contextResult) renderContext(state.contextResult);
+  else clearContextView();
   updateButtons();
   loadPreparedDraft();
   loadContext();
@@ -236,6 +246,13 @@ async function loadContext({ skipLazyDraft = false } = {}) {
     state.contextResult = result;
     renderContext(result);
     setStatus('Context ready');
+    if (result.enrichment_status === 'pending' && result.context_fingerprint) {
+      pollContextEnrichment({
+        contextKey,
+        requestId,
+        fingerprint: result.context_fingerprint
+      });
+    }
     if (!skipLazyDraft && !state.preparedDraftLookupPending) maybeGenerateLazyDraft();
     return result;
   } catch (error) {
@@ -244,6 +261,57 @@ async function loadContext({ skipLazyDraft = false } = {}) {
     els.contextSummary.textContent = error.message;
     els.contextBox.textContent = error.message;
     return null;
+  }
+}
+
+async function pollContextEnrichment({
+  contextKey,
+  requestId,
+  fingerprint,
+  attempt = 0
+}) {
+  if (!isCurrentContext({ contextKey, requestId, type: 'context' })) return;
+  const delays = [500, 1000, 1500, 2500, 4000, 5000, 5000, 5000];
+  if (attempt >= delays.length) return;
+
+  await wait(delays[attempt]);
+  if (!isCurrentContext({ contextKey, requestId, type: 'context' })) return;
+
+  try {
+    const result = await api('/api/context/enrichments', {
+      context_fingerprint: fingerprint
+    }, {
+      label: 'Context enrichment',
+      timeoutMs: PREPARED_DRAFT_API_TIMEOUT_MS
+    });
+    if (!isCurrentContext({ contextKey, requestId, type: 'context' })) return;
+
+    if (result.enrichment_status === 'ready' && result.context) {
+      state.contextResult = result.context;
+      renderContext(result.context);
+      setStatus('Context ready');
+      return;
+    }
+    if (result.enrichment_status === 'failed') {
+      setStatus('Context partially ready');
+      return;
+    }
+    pollContextEnrichment({
+      contextKey,
+      requestId,
+      fingerprint,
+      attempt: attempt + 1
+    });
+  } catch (error) {
+    if (!isCurrentContext({ contextKey, requestId, type: 'context' })) return;
+    if (attempt + 1 < delays.length) {
+      pollContextEnrichment({
+        contextKey,
+        requestId,
+        fingerprint,
+        attempt: attempt + 1
+      });
+    }
   }
 }
 
@@ -273,7 +341,7 @@ async function loadPreparedDraft({ pollAttempt = 0 } = {}) {
     }
 
     if (['pending', 'processing'].includes(result.status) && pollAttempt < 12) {
-      setStatus('Preparing draft...');
+      setDraftStatus('Draft preparing');
       window.setTimeout(() => {
         if (contextKey === state.contextKey) loadPreparedDraft({ pollAttempt: pollAttempt + 1 });
       }, 2500);
@@ -303,7 +371,10 @@ async function applyPreparedDraft(result = {}) {
     warnings: result.warnings || state.lastResult?.warnings || []
   };
 
-  if (result.context_summary && state.contextResult) {
+  if (result.context_payload) {
+    state.contextResult = result.context_payload;
+    renderContext(state.contextResult);
+  } else if (result.context_summary && state.contextResult) {
     state.contextResult = {
       ...state.contextResult,
       context_summary: result.context_summary,
@@ -329,7 +400,7 @@ async function applyPreparedDraft(result = {}) {
   persistSession();
   updateButtons();
   if (result.inserted_at) {
-    setStatus('Draft ready');
+    setDraftStatus('Draft ready');
     await insertPreparedDraftIfComposerIsEmpty(result.draft);
     return;
   }
@@ -361,7 +432,7 @@ async function generateLazyDraftFromContext() {
   const contextKey = state.contextKey;
   const requestId = state.chatRequestId + 1;
   state.chatRequestId = requestId;
-  setStatus('Preparing draft...');
+  setDraftStatus('Draft preparing');
   setBusy(true);
 
   try {
@@ -400,11 +471,11 @@ async function generateLazyDraftFromContext() {
     if (result.draft && !result.skip_insert && !result.preserve_draft) {
       await autoInsertReply(result.draft, { policy: 'auto' });
     } else {
-      setStatus('Ready');
+      setDraftStatus('Draft ready');
     }
   } catch (error) {
     if (!isCurrentContext({ contextKey, requestId, type: 'chat' })) return;
-    setStatus('Error');
+    setDraftStatus('Draft error');
     state.chatMessages.push({ role: 'assistant', content: error.message });
     renderChat();
     persistSession();
@@ -907,6 +978,12 @@ function renderContext(result = {}) {
   const view = buildContextView(result);
 
   els.orderStatus.textContent = view.topBar.order;
+  state.lastResult = {
+    ...(state.lastResult || {}),
+    contact_email: result.contact_email || state.lastResult?.contact_email,
+    context_summary: result.context_summary || state.lastResult?.context_summary,
+    warnings: result.warnings || state.lastResult?.warnings || []
+  };
   state.selectedOrderRef = normalizeOrderRef(result.context_summary?.selected_order_ref || state.selectedOrderRef);
   persistSession();
   renderContextSummary(view);
@@ -1425,7 +1502,21 @@ function stripHtml(value) {
 }
 
 function setStatus(text) {
-  els.status.textContent = text;
+  state.statusText = text;
+  renderStatus();
+}
+
+function setDraftStatus(text) {
+  state.draftStatusText = text;
+  renderStatus();
+}
+
+function renderStatus() {
+  els.status.textContent = [state.statusText, state.draftStatusText].filter(Boolean).join(' | ');
+}
+
+function wait(ms) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
 function parseMaybeJson(value) {

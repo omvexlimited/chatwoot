@@ -17,14 +17,21 @@ export async function analyzeAttachmentCandidates({ config, attachments = [] } =
   }
 
   const warnings = [];
-  const images = [];
-  for (const attachment of candidates.slice(0, MAX_ANALYZED_ATTACHMENTS)) {
+  const downloads = await Promise.all(candidates.slice(0, MAX_ANALYZED_ATTACHMENTS).map(async attachment => {
     try {
-      images.push(await downloadAttachmentImage({ config, attachment }));
+      return {
+        image: await downloadAttachmentImage({ config, attachment }),
+        warning: null
+      };
     } catch (error) {
-      warnings.push(`Image ${attachment.id || attachment.filename || 'attachment'} could not be analyzed: ${error.message}`);
+      return {
+        image: null,
+        warning: `Image ${attachment.id || attachment.filename || 'attachment'} could not be analyzed: ${error.message}`
+      };
     }
-  }
+  }));
+  const images = downloads.map(result => result.image).filter(Boolean);
+  warnings.push(...downloads.map(result => result.warning).filter(Boolean));
 
   if (!images.length) {
     return analysisResult({
@@ -97,28 +104,44 @@ async function downloadAttachmentImage({ config, attachment }) {
   const url = absoluteChatwootUrl({ config, url: attachment.data_url || attachment.thumb_url });
   if (!url) throw new Error('missing image URL');
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: config?.chatwootApiToken ? { api_access_token: config.chatwootApiToken } : {}
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const controller = new AbortController();
+  const timeoutMs = positiveNumber(config?.attachmentDownloadTimeoutMs, 5000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: config?.chatwootApiToken ? { api_access_token: config.chatwootApiToken } : {}
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-  const contentType = cleanContentType(response.headers?.get?.('content-type') || attachment.content_type || 'image/jpeg');
-  if (!contentType.startsWith('image/')) throw new Error(`not an image (${contentType || 'unknown content type'})`);
+    const contentType = cleanContentType(response.headers?.get?.('content-type') || attachment.content_type || 'image/jpeg');
+    if (!contentType.startsWith('image/')) throw new Error(`not an image (${contentType || 'unknown content type'})`);
 
-  const arrayBuffer = await response.arrayBuffer();
-  if (!arrayBuffer.byteLength) throw new Error('empty image');
-  if (arrayBuffer.byteLength > MAX_IMAGE_BYTES) throw new Error('image larger than 4 MB');
+    const arrayBuffer = await response.arrayBuffer();
+    if (!arrayBuffer.byteLength) throw new Error('empty image');
+    if (arrayBuffer.byteLength > MAX_IMAGE_BYTES) throw new Error('image larger than 4 MB');
 
-  const base64 = Buffer.from(arrayBuffer).toString('base64');
-  return {
-    id: String(attachment.id || attachment.attachment_id || attachment.filename || 'attachment'),
-    filename: attachment.filename || null,
-    content_type: contentType,
-    file_size: arrayBuffer.byteLength,
-    source_message_preview: attachment.source_message_preview || '',
-    data_url: `data:${contentType};base64,${base64}`
-  };
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    return {
+      id: String(attachment.id || attachment.attachment_id || attachment.filename || 'attachment'),
+      filename: attachment.filename || null,
+      content_type: contentType,
+      file_size: arrayBuffer.byteLength,
+      source_message_preview: attachment.source_message_preview || '',
+      data_url: `data:${contentType};base64,${base64}`
+    };
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error(`download timed out after ${timeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function buildVisionRequestBody({ config, images }) {

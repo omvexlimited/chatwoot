@@ -111,6 +111,7 @@ test('builds the context payload from a prepared draft row', () => {
   assert.equal(payload.conversation_id, '204');
   assert.equal(payload.contact_email, 'customer@example.com');
   assert.equal(payload.contact_phone, '07950527911');
+  assert.equal(payload.latest_message_id, null);
   assert.equal(payload.latest_message, 'Order number 2280 has it been dispatched');
   assert.equal(payload.latest_subject, 'Commande #2280');
 });
@@ -159,7 +160,9 @@ test('stores generated memory prepared drafts with inserted timestamp', async ()
     generate: async () => ({
       draft: 'Prepared draft',
       assistant_message: 'Prepared.',
-      inserted_at: '2026-06-19T10:00:00.000Z'
+      inserted_at: '2026-06-19T10:00:00.000Z',
+      context_payload: { context_status: 'ready', context_summary: { customer: { name: 'Test' } } },
+      context_fingerprint: 'fingerprint-1'
     }),
     limit: 1
   });
@@ -173,6 +176,11 @@ test('stores generated memory prepared drafts with inserted timestamp', async ()
 
   assert.equal(stored.status, 'generated');
   assert.equal(stored.inserted_at, '2026-06-19T10:00:00.000Z');
+  assert.deepEqual(stored.context_payload, {
+    context_status: 'ready',
+    context_summary: { customer: { name: 'Test' } }
+  });
+  assert.equal(stored.context_fingerprint, 'fingerprint-1');
 });
 
 test('builds actionable agent briefing for size change requests', () => {

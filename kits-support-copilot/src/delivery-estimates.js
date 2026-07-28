@@ -1,3 +1,5 @@
+import { withDatabaseClient } from './database.js';
+
 export async function getDeliveryEstimateContext({ config, order }) {
   if (!order) return null;
 
@@ -120,16 +122,14 @@ async function fetchCarrierStats({ config, carrier }) {
   const normalizedTarget = normalizeCarrierName(carrier);
   if (!normalizedTarget) return null;
 
-  const { Client } = await import('pg');
-  const client = new Client({
+  return withDatabaseClient({
+    role: 'kits-republic',
     connectionString: config.krAnalyticsDatabaseUrl,
-    ssl: config.krAnalyticsDatabaseSsl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 3000,
-    query_timeout: 5000
-  });
-
-  try {
-    await client.connect();
+    ssl: config.krAnalyticsDatabaseSsl,
+    max: config.krDatabasePoolSize,
+    connectionTimeoutMs: 3000,
+    queryTimeoutMs: 5000
+  }, async client => {
     const result = await client.query(
       `
       WITH carrier_rows AS (
@@ -171,9 +171,7 @@ async function fetchCarrierStats({ config, carrier }) {
     );
 
     return result.rows.find(row => normalizeCarrierName(row.carrier) === normalizedTarget) || null;
-  } finally {
-    await client.end().catch(() => {});
-  }
+  });
 }
 
 function carrierFromOrder(order = {}) {

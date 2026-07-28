@@ -135,10 +135,8 @@ test('builds phone fallback lookup queries without using phone filter syntax', (
   assert.equal(queries.some(query => query.startsWith('phone:')), false);
 });
 
-test('runs Shopify lookup queries concurrently for faster context loading', async t => {
+test('stops Shopify lookup after the first verified primary match', async t => {
   const originalFetch = globalThis.fetch;
-  let active = 0;
-  let maxActive = 0;
   let calls = 0;
 
   t.after(() => {
@@ -146,11 +144,7 @@ test('runs Shopify lookup queries concurrently for faster context loading', asyn
   });
 
   globalThis.fetch = async () => {
-    active += 1;
     calls += 1;
-    maxActive = Math.max(maxActive, active);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    active -= 1;
     return {
       ok: true,
       json: async () => ({
@@ -195,6 +189,62 @@ test('runs Shopify lookup queries concurrently for faster context loading', asyn
   });
 
   assert.equal(context.selected_order.name, '#1001');
+  assert.equal(calls, 1);
+  assert.deepEqual(context.queries, ['email:test@example.com']);
+});
+
+test('runs archived Shopify fallback queries concurrently when the primary lookup misses', async t => {
+  const originalFetch = globalThis.fetch;
+  let active = 0;
+  let maxActive = 0;
+  let calls = 0;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async (_url, options) => {
+    active += 1;
+    calls += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    active -= 1;
+    const query = JSON.parse(options.body).variables.query;
+    const orders = query.endsWith('status:closed')
+      ? [{
+          id: 'gid://shopify/Order/2',
+          name: '#1002',
+          email: 'archive@example.com',
+          createdAt: '2026-06-01T00:00:00Z',
+          currentTotalPriceSet: { shopMoney: { amount: '20.00', currencyCode: 'EUR' } },
+          customer: { email: 'archive@example.com', firstName: 'Archive', lastName: 'Customer', phone: null },
+          shippingAddress: { country: 'Spain', countryCodeV2: 'ES', phone: null },
+          lineItems: { nodes: [] },
+          fulfillments: []
+        }]
+      : [];
+    return {
+      ok: true,
+      json: async () => ({ data: { orders: { nodes: orders } } })
+    };
+  };
+
+  const context = await getShopifyContext({
+    config: {
+      shopifyStoreDomain: 'kits-republic.myshopify.com',
+      shopifyAdminAccessToken: 'token',
+      shopifyApiVersion: '2026-04',
+      shopifyQueryConcurrency: 4,
+      shopifyRequestTimeoutMs: 1000
+    },
+    contactEmail: 'archive@example.com',
+    contactPhone: '',
+    contactCountryCode: '',
+    text: '',
+    selectedOrderRef: ''
+  });
+
+  assert.equal(context.selected_order.name, '#1002');
   assert.equal(calls, 4);
   assert.ok(maxActive > 1);
 });

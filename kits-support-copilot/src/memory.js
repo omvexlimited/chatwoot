@@ -1,3 +1,5 @@
+import { withDatabaseClient } from './database.js';
+
 const HELP_TEXT = [
   'Available commands:',
   '',
@@ -487,18 +489,12 @@ function clean(value = '') {
 }
 
 async function withMemoryClient(config, callback) {
-  const { Client } = await import('pg');
-  const client = new Client({
+  return withDatabaseClient({
+    role: 'copilot',
     connectionString: config.copilotDatabaseUrl,
-    ssl: config.copilotDatabaseSsl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 3000,
-    query_timeout: 5000
-  });
-
-  try {
-    await client.connect();
-    return await callback(client);
-  } finally {
-    await client.end().catch(() => {});
-  }
+    ssl: config.copilotDatabaseSsl,
+    max: config.copilotDatabasePoolSize,
+    connectionTimeoutMs: 3000,
+    queryTimeoutMs: 10000
+  }, callback);
 }

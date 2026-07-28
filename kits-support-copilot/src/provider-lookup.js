@@ -1,3 +1,5 @@
+import { withDatabaseClient } from './database.js';
+
 export async function getAssignedProvider({ config, order }) {
   const result = await getAssignedProviders({ config, orders: order ? [order] : [] });
   return providerResultForOrder({ result, order });
@@ -13,16 +15,14 @@ export async function getAssignedProviders({ config, orders = [] }) {
     );
   }
 
-  const { Client } = await import('pg');
-  const client = new Client({
+  return withDatabaseClient({
+    role: 'kits-republic',
     connectionString: config.krProviderDatabaseUrl,
-    ssl: config.krProviderDatabaseSsl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 3000,
-    query_timeout: 5000
-  });
-
-  try {
-    await client.connect();
+    ssl: config.krProviderDatabaseSsl,
+    max: config.krDatabasePoolSize,
+    connectionTimeoutMs: 3000,
+    queryTimeoutMs: 5000
+  }, async client => {
     const shopifyIds = normalizedOrders.flatMap(shopifyOrderIdCandidates);
     const orderNumbers = normalizedOrders.flatMap(order => orderNumberCandidates(order.name));
     const result = await client.query(
@@ -63,9 +63,7 @@ export async function getAssignedProviders({ config, orders = [] }) {
       providers_by_order_ref: providersByOrderRef({ rows: result.rows, orders: normalizedOrders }),
       warnings: []
     };
-  } finally {
-    await client.end().catch(() => {});
-  }
+  });
 }
 
 function providerResultForOrder({ result, order }) {

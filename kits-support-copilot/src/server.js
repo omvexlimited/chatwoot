@@ -62,10 +62,16 @@ import {
   prependSubjectToText
 } from './prompt.js';
 import { generateChatWithOpenAI, generateDraftWithOpenAI } from './openai.js';
+import { closeDatabasePools } from './database.js';
+import { createContextFingerprint, createContextJobStore } from './context-cache.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, '..', 'public');
 const config = loadConfig();
+const contextJobs = createContextJobStore({
+  ttlMs: config.contextCacheTtlMs,
+  maxEntries: config.contextCacheMaxEntries
+});
 const fallbackKnowledgeBase = await loadKnowledgeBase();
 const getKnowledge = createPlaybookKnowledgeProvider({ config, fallbackKnowledgeBase });
 await ensureMemoryTable({ config }).catch(error => {
@@ -74,7 +80,11 @@ await ensureMemoryTable({ config }).catch(error => {
 await ensurePreparedDraftsTable({ config }).catch(error => {
   console.warn(`KR Copilot prepared drafts disabled: ${error.message}`);
 });
-startPreparedDraftWorker({ config, generate: generatePreparedDraftForJob });
+startPreparedDraftWorker({
+  config,
+  generate: generatePreparedDraftForJob,
+  intervalMs: config.preparedDraftWorkerIntervalMs
+});
 
 const server = http.createServer((req, res) => {
   handleRequest(req, res).catch(error => {
@@ -108,6 +118,11 @@ async function handleRequest(req, res) {
     if (req.method === 'POST' && url.pathname === '/api/context') {
       if (!authorizeApiRequest(req, url, res)) return;
       return handleContext(req, res);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/context/enrichments') {
+      if (!authorizeApiRequest(req, url, res)) return;
+      return handleContextEnrichments(req, res);
     }
 
     if (req.method === 'POST' && url.pathname === '/api/copilot-chat') {
@@ -158,6 +173,15 @@ function handleRequestError({ req, res, error }) {
 server.listen(config.port, () => {
   console.log(`KR Copilot listening on ${config.port}`);
 });
+
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.once(signal, () => {
+    server.close(async () => {
+      await closeDatabasePools();
+      process.exit(0);
+    });
+  });
+}
 
 async function handleChatwootWebhook(req, res) {
   const rawBody = await readRawBody(req);
@@ -245,8 +269,185 @@ async function handleSuggestReply(req, res) {
 
 async function handleContext(req, res) {
   const body = await readJsonBody(req);
-  const context = await prepareConversationContext(body);
-  return sendJson(res, 200, contextPayload(context));
+  const preparedDraftContext = config.progressiveContext
+    ? await contextFromPreparedDraft(body).catch(() => null)
+    : null;
+  if (preparedDraftContext) {
+    logContextTiming({
+      fingerprint: preparedDraftContext.fingerprint,
+      status: 'ready',
+      cacheHit: 'prepared_draft',
+      timings: {}
+    });
+    return sendJson(res, 200, {
+      ...preparedDraftContext.payload,
+      context_status: 'ready',
+      enrichment_status: 'ready'
+    });
+  }
+
+  const requestFingerprint = contextFingerprintFromBody(body);
+  const cached = requestFingerprint ? contextJobs.get(requestFingerprint) : null;
+  if (cached?.status === 'ready' && cached.value) {
+    logContextTiming({
+      fingerprint: requestFingerprint,
+      status: 'ready',
+      cacheHit: 'memory',
+      timings: cached.value.timings,
+      context: cached.value
+    });
+    return sendJson(res, 200, contextPayload(cached.value, {
+      contextFingerprint: requestFingerprint,
+      contextStatus: 'ready',
+      enrichmentStatus: 'ready'
+    }), serverTimingHeaders(cached.value.timings));
+  }
+
+  const prepared = await prepareConversationCore(body);
+  const fingerprint = prepared.contextFingerprint;
+
+  if (!config.progressiveContext) {
+    const context = await completeConversationContext(prepared);
+    contextJobs.setReady(fingerprint, context);
+    logContextTiming({
+      fingerprint,
+      status: 'ready',
+      cacheHit: false,
+      timings: context.timings,
+      context
+    });
+    return sendJson(res, 200, contextPayload(context, {
+      contextFingerprint: fingerprint,
+      contextStatus: 'ready',
+      enrichmentStatus: 'ready'
+    }), serverTimingHeaders(context.timings));
+  }
+
+  const existing = contextJobs.get(fingerprint);
+  if (existing?.status === 'ready' && existing.value) {
+    logContextTiming({
+      fingerprint,
+      status: 'ready',
+      cacheHit: 'memory',
+      timings: existing.value.timings,
+      context: existing.value
+    });
+    return sendJson(res, 200, contextPayload(existing.value, {
+      contextFingerprint: fingerprint,
+      contextStatus: 'ready',
+      enrichmentStatus: 'ready'
+    }), serverTimingHeaders(existing.value.timings));
+  }
+  if (existing?.status === 'failed') contextJobs.remove(fingerprint);
+
+  contextJobs.start(fingerprint, () => completeConversationContext(prepared));
+  const context = buildCoreConversationContext(prepared);
+  logContextTiming({
+    fingerprint,
+    status: 'core',
+    cacheHit: false,
+    timings: context.timings,
+    context
+  });
+  return sendJson(res, 200, contextPayload(context, {
+    contextFingerprint: fingerprint,
+    contextStatus: 'core',
+    enrichmentStatus: 'pending'
+  }), serverTimingHeaders(context.timings));
+}
+
+async function handleContextEnrichments(req, res) {
+  const body = await readJsonBody(req);
+  const fingerprint = String(body.context_fingerprint || '').trim();
+  if (!fingerprint) return sendJson(res, 422, { error: 'context_fingerprint is required' });
+
+  const entry = contextJobs.get(fingerprint);
+  if (!entry) {
+    return sendJson(res, 404, {
+      context_fingerprint: fingerprint,
+      enrichment_status: 'expired'
+    });
+  }
+  if (entry.status === 'pending') {
+    return sendJson(res, 200, {
+      context_fingerprint: fingerprint,
+      enrichment_status: 'pending'
+    });
+  }
+  if (entry.status === 'failed' || !entry.value) {
+    return sendJson(res, 200, {
+      context_fingerprint: fingerprint,
+      enrichment_status: 'failed',
+      error: entry.error?.message || 'Context enrichment failed.'
+    });
+  }
+
+  logContextTiming({
+    fingerprint,
+    status: 'ready',
+    cacheHit: 'enrichment',
+    timings: entry.value.timings,
+    context: entry.value
+  });
+  return sendJson(res, 200, {
+    context_fingerprint: fingerprint,
+    enrichment_status: 'ready',
+    context: contextPayload(entry.value, {
+      contextFingerprint: fingerprint,
+      contextStatus: 'ready',
+      enrichmentStatus: 'ready'
+    })
+  }, serverTimingHeaders(entry.value.timings));
+}
+
+async function contextFromPreparedDraft(body) {
+  const accountId = body.account_id || body.conversation?.account_id || config.chatwootAccountId;
+  const conversationId = body.conversation_display_id || body.conversation?.display_id
+    || body.conversation_id || body.conversation?.id;
+  const latestMessageId = body.latest_message_id || body.message_id || '';
+  if (!accountId || !conversationId || !latestMessageId) return null;
+
+  const fingerprint = createContextFingerprint({
+    accountId,
+    conversationId,
+    latestMessageId,
+    selectedOrderRef: body.selected_order_ref,
+    forcedSupportCase: body.forced_support_case
+  });
+  const draft = await getPreparedDraft({
+    config,
+    accountId,
+    conversationId,
+    latestMessageId
+  });
+  if (
+    draft.status !== 'generated'
+    || draft.context_fingerprint !== fingerprint
+    || !draft.context_payload
+  ) {
+    return null;
+  }
+
+  return {
+    fingerprint,
+    payload: draft.context_payload
+  };
+}
+
+function contextFingerprintFromBody(body) {
+  const accountId = body.account_id || body.conversation?.account_id || config.chatwootAccountId;
+  const conversationId = body.conversation_display_id || body.conversation?.display_id
+    || body.conversation_id || body.conversation?.id;
+  const latestMessageId = body.latest_message_id || body.message_id || '';
+  if (!accountId || !conversationId || !latestMessageId) return null;
+
+  return createContextFingerprint({
+    accountId,
+    conversationId,
+    latestMessageId,
+    selectedOrderRef: body.selected_order_ref,
+    forcedSupportCase: body.forced_support_case
+  });
 }
 
 async function handleCopilotChat(req, res) {
@@ -688,15 +889,41 @@ async function handlePrepareReply(req, res) {
 }
 
 async function prepareConversationContext(body) {
+  const requestFingerprint = contextFingerprintFromBody(body);
+  const requestEntry = requestFingerprint ? contextJobs.get(requestFingerprint) : null;
+  if (requestEntry?.status === 'ready' && requestEntry.value) return requestEntry.value;
+  if (requestEntry?.status === 'pending') {
+    const context = await requestEntry.promise;
+    if (context) return context;
+  }
+  if (requestEntry?.status === 'failed') contextJobs.remove(requestFingerprint);
+
+  const prepared = await prepareConversationCore(body);
+  const existing = contextJobs.get(prepared.contextFingerprint);
+  if (existing?.status === 'ready' && existing.value) return existing.value;
+  if (existing?.status === 'failed') contextJobs.remove(prepared.contextFingerprint);
+
+  const entry = contextJobs.start(
+    prepared.contextFingerprint,
+    () => completeConversationContext(prepared)
+  );
+  const context = await entry.promise;
+  if (!context) throw entry.error || new Error('Context enrichment failed.');
+  return context;
+}
+
+async function prepareConversationCore(body) {
+  const timings = {};
+  const contextStartedAt = performance.now();
   const accountId = body.account_id || body.conversation?.account_id || config.chatwootAccountId;
   const conversationId = body.conversation_display_id || body.conversation?.display_id || body.conversation_id || body.conversation?.id;
   const fallbackMessages = body.conversation?.messages || [];
 
-  const chatwootResult = await fetchConversationMessages({
+  const chatwootResult = await measureStage(timings, 'chatwoot', () => fetchConversationMessages({
     config,
     accountId,
     conversationId
-  }).catch(error => ({
+  })).catch(error => ({
     available: false,
     messages: [],
     warnings: [`Chatwoot API lookup failed: ${error.message}`]
@@ -717,18 +944,29 @@ async function prepareConversationContext(body) {
   const contactCountryCode = body.country_code || contact.country_code
     || contact.additional_attributes?.country_code || contact.additional_attributes?.country || '';
 
-  const shopifyContext = await getShopifyContext({
+  const attachmentAnalysisPromise = measureStage(timings, 'attachments', () => analyzeAttachmentCandidates({
+    config,
+    attachments: attachmentCandidates
+  })).catch(error => ({
+    available: false,
+    source: null,
+    reason: 'lookup_failed',
+    analyzed_count: 0,
+    analyses: [],
+    warnings: [`Attachment analysis failed: ${error.message}`]
+  }));
+  const shopifyContext = await measureStage(timings, 'shopify', () => getShopifyContext({
     config,
     contactEmail,
     contactPhone,
     contactCountryCode,
     text: [latestMessage, conversationText].join('\n'),
     selectedOrderRef: body.selected_order_ref
-  });
-  const providerLookupContext = await getAssignedProviders({
+  }));
+  const providerLookupPromise = measureStage(timings, 'provider', () => getAssignedProviders({
     config,
     orders: shopifyContext.orders
-  }).catch(error => ({
+  })).catch(error => ({
     available: false,
     source: null,
     reason: 'lookup_failed',
@@ -736,36 +974,19 @@ async function prepareConversationContext(body) {
     provider: null,
     warnings: [`Provider lookup failed: ${error.message}`]
   }));
-  attachProvidersToShopifyContext(shopifyContext, providerLookupContext);
-  const providerContext = selectedProviderContext({ providerLookupContext, order: shopifyContext.selected_order });
-  attachProviderToShopifyContext(shopifyContext, providerContext);
-
-  const deliveryEstimateContext = await getDeliveryEstimateContext({
+  const deliveryEstimatePromise = measureStage(timings, 'delivery', () => getDeliveryEstimateContext({
     config,
     order: shopifyContext.selected_order
-  }).catch(error => ({
+  })).catch(error => ({
     available: false,
     source: null,
     reason: 'lookup_failed',
     warnings: [`Delivery analytics lookup failed: ${error.message}`]
   }));
-
-  const providerTrackingContext = await getProviderTrackingContext({
-    provider: providerContext.provider,
-    order: shopifyContext.selected_order
-  }).catch(error => ({
-    available: false,
-    source: null,
-    reason: 'lookup_failed',
-    warnings: [`Provider tracking lookup failed: ${error.message}`],
-    latest_events: [],
-    timeline: []
-  }));
-
-  const issueContext = await getIssueContext({
+  const issuePromise = measureStage(timings, 'issues', () => getIssueContext({
     config,
     order: shopifyContext.selected_order
-  }).catch(error => ({
+  })).catch(error => ({
     available: false,
     source: null,
     reason: 'lookup_failed',
@@ -774,26 +995,13 @@ async function prepareConversationContext(body) {
     issues: [],
     warnings: [`Issue lookup failed: ${error.message}`]
   }));
-
-  const attachmentAnalysis = await analyzeAttachmentCandidates({
-    config,
-    attachments: attachmentCandidates
-  }).catch(error => ({
-    available: false,
-    source: null,
-    reason: 'lookup_failed',
-    analyzed_count: 0,
-    analyses: [],
-    warnings: [`Attachment analysis failed: ${error.message}`]
-  }));
-
-  const duplicateContext = await getDuplicateContext({
+  const duplicatePromise = measureStage(timings, 'duplicates', () => getDuplicateContext({
     body,
     accountId,
     conversationId,
     contactEmail,
     shopifyContext
-  }).catch(error => ({
+  })).catch(error => ({
     available: false,
     source: null,
     reason: 'lookup_failed',
@@ -802,8 +1010,145 @@ async function prepareConversationContext(body) {
     warnings: [`Duplicate lookup failed: ${error.message}`]
   }));
 
+  const providerLookupContext = await providerLookupPromise;
+  attachProvidersToShopifyContext(shopifyContext, providerLookupContext);
+  const providerContext = selectedProviderContext({ providerLookupContext, order: shopifyContext.selected_order });
+  attachProviderToShopifyContext(shopifyContext, providerContext);
+
+  const providerTrackingPromise = measureStage(timings, 'tracking', () => getProviderTrackingContext({
+    provider: providerContext.provider,
+    order: shopifyContext.selected_order
+  })).catch(error => ({
+    available: false,
+    source: null,
+    reason: 'lookup_failed',
+    warnings: [`Provider tracking lookup failed: ${error.message}`],
+    latest_events: [],
+    timeline: []
+  }));
+
+  const latestPublicMessage = latestPublicChatMessage(messages);
+  const latestMessageId = body.latest_message_id || body.message_id
+    || latestPublicMessage?.id || messages.at(-1)?.id
+    || `${messages.length}:${latestMessage.slice(0, 80)}`;
+  const contextFingerprint = createContextFingerprint({
+    accountId,
+    conversationId,
+    latestMessageId,
+    selectedOrderRef: body.selected_order_ref,
+    forcedSupportCase: body.forced_support_case
+  });
+  timings.core = roundDuration(performance.now() - contextStartedAt);
+
+  return {
+    body,
+    contextFingerprint,
+    contextStartedAt,
+    timings,
+    base: {
+      accountId,
+      conversationId,
+      displayId: body.conversation?.display_id || conversationId,
+      contactEmail,
+      contactPhone,
+      latestMessage,
+      conversationText,
+      messageCount: messages.length,
+      attachmentCandidates,
+      chatwootAvailable: Boolean(chatwootResult.available),
+      chatwootWarnings: chatwootResult.warnings || [],
+      shopifyContext,
+      providerContext
+    },
+    pending: {
+      deliveryEstimatePromise,
+      providerTrackingPromise,
+      issuePromise,
+      attachmentAnalysisPromise,
+      duplicatePromise
+    }
+  };
+}
+
+async function completeConversationContext(prepared) {
+  const [
+    deliveryEstimateContext,
+    providerTrackingContext,
+    issueContext,
+    attachmentAnalysis,
+    duplicateContext
+  ] = await Promise.all([
+    prepared.pending.deliveryEstimatePromise,
+    prepared.pending.providerTrackingPromise,
+    prepared.pending.issuePromise,
+    prepared.pending.attachmentAnalysisPromise,
+    prepared.pending.duplicatePromise
+  ]);
+  prepared.timings.total = roundDuration(performance.now() - prepared.contextStartedAt);
+
+  return finalizeConversationContext({
+    prepared,
+    deliveryEstimateContext,
+    providerTrackingContext,
+    issueContext,
+    attachmentAnalysis,
+    duplicateContext
+  });
+}
+
+function buildCoreConversationContext(prepared) {
+  const hasAttachments = prepared.base.attachmentCandidates.length > 0;
+  return finalizeConversationContext({
+    prepared,
+    deliveryEstimateContext: null,
+    providerTrackingContext: pendingProviderTrackingContext(),
+    issueContext: pendingIssueContext(prepared.base.shopifyContext.selected_order),
+    attachmentAnalysis: {
+      available: false,
+      source: null,
+      reason: hasAttachments ? 'pending' : 'no_image_attachments',
+      analyzed_count: 0,
+      analyses: [],
+      warnings: []
+    },
+    duplicateContext: {
+      available: false,
+      source: null,
+      reason: 'pending',
+      possible_duplicates: [],
+      confirmed_duplicate: false,
+      warnings: []
+    }
+  });
+}
+
+function finalizeConversationContext({
+  prepared,
+  deliveryEstimateContext,
+  providerTrackingContext,
+  issueContext,
+  attachmentAnalysis,
+  duplicateContext
+}) {
+  const { body, base } = prepared;
+  const {
+    accountId,
+    conversationId,
+    displayId,
+    contactEmail,
+    contactPhone,
+    latestMessage,
+    conversationText,
+    messageCount,
+    attachmentCandidates,
+    chatwootAvailable,
+    chatwootWarnings,
+    shopifyContext,
+    providerContext
+  } = base;
+
   const warnings = uniqueStrings([
-    ...(chatwootResult.warnings || []),
+    ...chatwootWarnings,
     ...(shopifyContext.warnings || []),
     ...(providerContext.warnings || []),
     ...(providerTrackingContext?.warnings || []),
@@ -842,16 +1187,18 @@ async function prepareConversationContext(body) {
   });
 
   return {
+    contextFingerprint: prepared.contextFingerprint,
+    timings: { ...prepared.timings },
     accountId,
     conversationId,
-    displayId: body.conversation?.display_id || conversationId,
+    displayId,
     contactEmail,
     contactPhone,
     latestMessage,
     conversationText,
-    messageCount: messages.length,
+    messageCount,
     attachmentCandidates,
-    chatwootAvailable: Boolean(chatwootResult.available),
+    chatwootAvailable,
     shopifyContext,
     providerContext,
     providerTrackingContext,
@@ -865,6 +1212,29 @@ async function prepareConversationContext(body) {
     forcedSupportCase: forcedSupportCaseType || null,
     caseReview,
     warnings
+  };
+}
+
+function pendingProviderTrackingContext() {
+  return {
+    available: false,
+    source: null,
+    reason: 'pending',
+    latest_events: [],
+    timeline: [],
+    warnings: []
+  };
+}
+
+function pendingIssueContext(order) {
+  return {
+    available: false,
+    source: null,
+    reason: 'pending',
+    order_ref: order?.name || null,
+    total: 0,
+    issues: [],
+    warnings: []
   };
 }
 
@@ -1029,6 +1399,12 @@ async function generatePreparedDraftForJob(row) {
     agent_briefing: agentBriefing,
     reasoning_summary: result.reasoning_summary,
     context_summary: summarizeContext(context),
+    context_payload: contextPayload(context, {
+      contextFingerprint: context.contextFingerprint,
+      contextStatus: 'ready',
+      enrichmentStatus: 'ready'
+    }),
+    context_fingerprint: context.contextFingerprint,
     confidence: result.confidence,
     warnings: uniqueStrings([...warnings, ...nativeDraft.warnings]),
     inserted_at: nativeDraft.inserted_at
@@ -1162,8 +1538,15 @@ function selectedProviderContext({ providerLookupContext, order }) {
   };
 }
 
-function contextPayload(context) {
+function contextPayload(context, {
+  contextFingerprint = null,
+  contextStatus = 'ready',
+  enrichmentStatus = 'ready'
+} = {}) {
   return {
+    context_fingerprint: contextFingerprint,
+    context_status: contextStatus,
+    enrichment_status: enrichmentStatus,
     account_id: context.accountId,
     conversation_id: context.conversationId,
     display_id: context.displayId,
@@ -1501,9 +1884,51 @@ function addSecurityHeaders(_req, res) {
   res.setHeader('Referrer-Policy', 'no-referrer');
 }
 
-function sendJson(res, status, data) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+function sendJson(res, status, data, headers = {}) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    ...headers
+  });
   res.end(JSON.stringify(data));
+}
+
+async function measureStage(timings, name, operation) {
+  const startedAt = performance.now();
+  try {
+    return await operation();
+  } finally {
+    timings[name] = roundDuration(performance.now() - startedAt);
+  }
+}
+
+function roundDuration(value) {
+  return Math.round(Number(value) * 10) / 10;
+}
+
+function serverTimingHeaders(timings = {}) {
+  const metrics = Object.entries(timings)
+    .filter(([, duration]) => Number.isFinite(Number(duration)))
+    .map(([name, duration]) => `${name.replace(/[^a-z0-9_-]/gi, '_')};dur=${Number(duration)}`);
+  return metrics.length ? { 'Server-Timing': metrics.join(', ') } : {};
+}
+
+function logContextTiming({
+  fingerprint,
+  status,
+  cacheHit,
+  timings = {},
+  context = null
+}) {
+  console.log(JSON.stringify({
+    event: 'context_timing',
+    fingerprint: String(fingerprint || '').slice(0, 12),
+    status,
+    cache_hit: cacheHit,
+    timings_ms: timings,
+    shopify_queries: context?.shopifyContext?.queries?.length || 0,
+    attachments: context?.attachmentCandidates?.length || 0,
+    warnings: context?.warnings?.length || 0
+  }));
 }
 
 function mimeType(filePath) {

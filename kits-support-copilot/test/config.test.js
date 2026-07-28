@@ -101,6 +101,39 @@ test('uses Kits Republic admin database for copilot memory provider lookup and a
   assert.equal(getConfigStatus(config).delivery_analytics, true);
 });
 
+test('prefers a dedicated copilot database and supports performance settings', () => {
+  const config = loadConfig({
+    KITS_REPUBLIC_DATABASE_URL: 'postgres://kits-admin',
+    COPILOT_DATABASE_URL: 'postgres://copilot',
+    COPILOT_DATABASE_SSL: 'false',
+    COPILOT_DATABASE_POOL_SIZE: '6',
+    KR_DATABASE_POOL_SIZE: '3',
+    COPILOT_PROGRESSIVE_CONTEXT: 'true',
+    COPILOT_CONTEXT_CACHE_TTL_MS: '120000',
+    COPILOT_CONTEXT_CACHE_MAX_ENTRIES: '50',
+    PREPARED_DRAFT_WORKER_INTERVAL_MS: '45000',
+    ATTACHMENT_DOWNLOAD_TIMEOUT_MS: '3500'
+  });
+
+  assert.equal(config.copilotDatabaseUrl, 'postgres://copilot');
+  assert.equal(config.krProviderDatabaseUrl, 'postgres://kits-admin');
+  assert.equal(config.copilotDatabaseSsl, false);
+  assert.equal(config.copilotDatabasePoolSize, 6);
+  assert.equal(config.krDatabasePoolSize, 3);
+  assert.equal(config.progressiveContext, true);
+  assert.equal(config.contextCacheTtlMs, 120000);
+  assert.equal(config.contextCacheMaxEntries, 50);
+  assert.equal(config.preparedDraftWorkerIntervalMs, 45000);
+  assert.equal(config.attachmentDownloadTimeoutMs, 3500);
+});
+
+test('keeps progressive context disabled by default', () => {
+  const config = loadConfig({});
+
+  assert.equal(config.progressiveContext, false);
+  assert.equal(config.preparedDraftWorkerIntervalMs, 60000);
+});
+
 test('does not enable copilot memory from legacy provider database only', () => {
   const config = loadConfig({
     KR_PROVIDER_DATABASE_URL: 'postgres://provider'

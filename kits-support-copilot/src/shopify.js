@@ -1,5 +1,6 @@
 import { extractIdentifiers, normalizeOrderRef, normalizePhoneCandidates } from './extract.js';
 import { hasShopifyClientCredentials, shopifyAuthMode } from './config.js';
+import { withDatabaseClient } from './database.js';
 
 const ORDER_STATUS_QUERY_SUFFIXES = ['', ' status:open', ' status:closed', ' status:cancelled'];
 
@@ -89,12 +90,12 @@ export async function getShopifyContext({ config, contactEmail, contactPhone, co
     };
   }
 
-  const queries = buildShopifyQueries({ contactEmail, identifiers, selectedOrderRef });
-  if (queries.length === 0) {
+  const queryStages = buildShopifyQueryStages({ contactEmail, identifiers, selectedOrderRef });
+  if (queryStages.length === 0) {
     return {
       available: true,
       identifiers,
-      queries,
+      queries: [],
       orders: [],
       selected_order: null,
       selection_reason: null,
@@ -102,6 +103,7 @@ export async function getShopifyContext({ config, contactEmail, contactPhone, co
     };
   }
 
+  const queries = [];
   let accessToken;
   try {
     accessToken = await getShopifyAccessToken(config);
@@ -119,9 +121,35 @@ export async function getShopifyContext({ config, contactEmail, contactPhone, co
 
   const orderMap = new Map();
   const trustedOrderRefs = new Set();
-  const initialSearch = await searchOrdersForQueries({ config, accessToken, queries });
-  warnings.push(...initialSearch.warnings);
-  addOrdersToMap(orderMap, initialSearch.orders);
+  for (const stage of queryStages) {
+    const primaryQueries = stage.baseQueries.filter(query => !queries.includes(query));
+    queries.push(...primaryQueries);
+    const primarySearch = await searchOrdersForQueries({ config, accessToken, queries: primaryQueries });
+    warnings.push(...primarySearch.warnings);
+    addOrdersToMap(orderMap, primarySearch.orders);
+    if (hasVerifiedSelection({
+      orders: [...orderMap.values()],
+      identifiers,
+      contactEmail,
+      selectedOrderRef,
+      trustedOrderRefs
+    })) break;
+
+    const statusQueries = stage.baseQueries
+      .flatMap(query => withOrderStatusQueries(query).slice(1))
+      .filter(query => !queries.includes(query));
+    queries.push(...statusQueries);
+    const statusSearch = await searchOrdersForQueries({ config, accessToken, queries: statusQueries });
+    warnings.push(...statusSearch.warnings);
+    addOrdersToMap(orderMap, statusSearch.orders);
+    if (hasVerifiedSelection({
+      orders: [...orderMap.values()],
+      identifiers,
+      contactEmail,
+      selectedOrderRef,
+      trustedOrderRefs
+    })) break;
+  }
 
   const email = normalizeEmail(contactEmail || identifiers.emails[0]);
   if (shouldRunInternalEmailFallback({ orders: [...orderMap.values()], email })) {
@@ -190,8 +218,42 @@ export function buildShopifyQueries({ contactEmail, identifiers, selectedOrderRe
   return [...new Set(queries)].slice(0, 32);
 }
 
+export function buildShopifyQueryStages({ contactEmail, identifiers, selectedOrderRef = '' }) {
+  const stages = [];
+  const selected = normalizeOrderRef(selectedOrderRef);
+  const orderRefs = [...new Set((identifiers.orderRefs || []).map(normalizeOrderRef).filter(Boolean))];
+  const trackingNumbers = [...new Set(identifiers.trackingNumbers || [])];
+  const email = contactEmail || identifiers.emails?.[0];
+  const phoneNumbers = [...new Set(identifiers.phoneNumbers || [])];
+
+  if (selected) stages.push({ type: 'selected_order', baseQueries: [`name:${selected}`] });
+  const remainingOrderRefs = orderRefs.filter(orderRef => orderRef !== selected);
+  if (remainingOrderRefs.length) {
+    stages.push({ type: 'order_ref', baseQueries: remainingOrderRefs.map(orderRef => `name:${orderRef}`) });
+  }
+  if (trackingNumbers.length) stages.push({ type: 'tracking', baseQueries: trackingNumbers });
+  if (email) stages.push({ type: 'email', baseQueries: [`email:${email}`] });
+  if (phoneNumbers.length) stages.push({ type: 'phone', baseQueries: phoneNumbers });
+
+  return stages;
+}
+
 function withOrderStatusQueries(baseQuery) {
   return ORDER_STATUS_QUERY_SUFFIXES.map(suffix => `${baseQuery}${suffix}`);
+}
+
+function hasVerifiedSelection({
+  orders,
+  identifiers,
+  contactEmail,
+  selectedOrderRef,
+  trustedOrderRefs
+}) {
+  return Boolean(selectOrder(
+    orders,
+    identifiers,
+    { contactEmail, selectedOrderRef, trustedOrderRefs: [...trustedOrderRefs] }
+  ).order);
 }
 
 export function selectOrder(orders, identifiers, {
@@ -377,16 +439,14 @@ function shouldRunInternalEmailFallback({ orders = [], email = '' }) {
 async function lookupInternalOrderRefsByEmail({ config, email }) {
   if (!config.krProviderDatabaseUrl) return [];
 
-  const { Client } = await import('pg');
-  const client = new Client({
+  return withDatabaseClient({
+    role: 'kits-republic',
     connectionString: config.krProviderDatabaseUrl,
-    ssl: config.krProviderDatabaseSsl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 3000,
-    query_timeout: 5000
-  });
-
-  try {
-    await client.connect();
+    ssl: config.krProviderDatabaseSsl,
+    max: config.krDatabasePoolSize,
+    connectionTimeoutMs: 3000,
+    queryTimeoutMs: 5000
+  }, async client => {
     const result = await client.query(
       `
       SELECT order_number
@@ -401,9 +461,7 @@ async function lookupInternalOrderRefsByEmail({ config, email }) {
     );
 
     return [...new Set(result.rows.map(row => normalizeOrderRef(row.order_number)).filter(Boolean))];
-  } finally {
-    await client.end().catch(() => {});
-  }
+  });
 }
 
 function uniqueOrders(orders = []) {

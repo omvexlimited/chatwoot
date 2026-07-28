@@ -17,9 +17,19 @@ Required for full functionality:
 Recommended:
 
 - `COPILOT_API_TOKEN` shared token used by the embedded Dashboard App URL.
-- `COPILOT_DATABASE_URL` for persistent global memory commands. Falls back to `DATABASE_URL`.
+- `COPILOT_DATABASE_URL` for memories and prepared drafts. Use a private PostgreSQL instance in the same Railway region. It falls back to `KITS_REPUBLIC_DATABASE_URL` during migration.
+- `COPILOT_DATABASE_SSL=false` for Railway private networking.
+- `COPILOT_PROGRESSIVE_CONTEXT=true` to return core context first and load slower enrichments in the background.
 - `OPENAI_MODEL` defaults to `gpt-5.5`.
 - `SHOPIFY_API_VERSION` defaults to `2026-04`.
+
+Performance controls:
+
+- `COPILOT_DATABASE_POOL_SIZE` and `KR_DATABASE_POOL_SIZE` default to `4`.
+- `COPILOT_CONTEXT_CACHE_TTL_MS` defaults to `300000`.
+- `COPILOT_CONTEXT_CACHE_MAX_ENTRIES` defaults to `200`.
+- `PREPARED_DRAFT_WORKER_INTERVAL_MS` defaults to `60000`.
+- `ATTACHMENT_DOWNLOAD_TIMEOUT_MS` defaults to `5000`.
 
 ## Local Run
 
@@ -29,6 +39,16 @@ npm start
 ```
 
 Open `http://localhost:3000/?token=...`.
+
+## Database Migration
+
+To move existing memories from the Kits Republic database to the dedicated Copilot database:
+
+```sh
+KITS_REPUBLIC_DATABASE_URL=... COPILOT_DATABASE_URL=... npm run migrate:memories
+```
+
+The migration is idempotent and verifies both row count and content digest before it succeeds.
 
 ## Chatwoot Dashboard App URL
 

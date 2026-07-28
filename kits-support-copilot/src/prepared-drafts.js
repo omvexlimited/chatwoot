@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { messageSubject } from './prompt.js';
+import { withDatabaseClient } from './database.js';
 
 const ACTIVE_STATUSES = ['pending', 'processing', 'generated'];
 const WEBHOOK_MAX_AGE_SECONDS = 10 * 60;
@@ -31,6 +32,8 @@ export async function ensurePreparedDraftsTable({ config }) {
         assistant_message TEXT,
         agent_briefing JSONB,
         context_summary JSONB,
+        context_payload JSONB,
+        context_fingerprint TEXT,
         warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
         confidence TEXT,
         failure_reason TEXT,
@@ -40,6 +43,8 @@ export async function ensurePreparedDraftsTable({ config }) {
         inserted_at TIMESTAMPTZ
       )
     `);
+    await client.query('ALTER TABLE copilot_prepared_drafts ADD COLUMN IF NOT EXISTS context_payload JSONB');
+    await client.query('ALTER TABLE copilot_prepared_drafts ADD COLUMN IF NOT EXISTS context_fingerprint TEXT');
     await client.query('CREATE INDEX IF NOT EXISTS copilot_prepared_drafts_conversation_idx ON copilot_prepared_drafts (account_id, conversation_id, updated_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS copilot_prepared_drafts_status_idx ON copilot_prepared_drafts (status, created_at ASC)');
   });
@@ -265,6 +270,7 @@ export function buildPreparedDraftPayload(row = {}) {
     account_id: row.account_id || payload.account?.id,
     conversation_id: row.conversation_id || conversation.id || payload.conversation_id,
     conversation_display_id: row.conversation_id || conversation.id || payload.conversation_id,
+    latest_message_id: row.chatwoot_message_id || payload.id || null,
     contact_email: row.contact_email || sender.email,
     contact_phone: sender.phone_number || sender.phone || '',
     latest_message: payload.content || '',
@@ -451,6 +457,8 @@ async function processPreparedDraftRow({ config, generate, row }) {
         assistant_message: result.assistant_message || '',
         agent_briefing: result.agent_briefing || null,
         context_summary: result.context_summary || null,
+        context_payload: result.context_payload || null,
+        context_fingerprint: result.context_fingerprint || null,
         warnings: normalizeArray(result.warnings),
         confidence: result.confidence || 'low',
         failure_reason: null,
@@ -468,9 +476,11 @@ async function processPreparedDraftRow({ config, generate, row }) {
             assistant_message = $3,
             agent_briefing = $4::jsonb,
             context_summary = $5::jsonb,
-            warnings = $6::jsonb,
-            confidence = $7,
-            inserted_at = COALESCE($8::timestamptz, inserted_at),
+            context_payload = $6::jsonb,
+            context_fingerprint = $7,
+            warnings = $8::jsonb,
+            confidence = $9,
+            inserted_at = COALESCE($10::timestamptz, inserted_at),
             failure_reason = NULL,
             updated_at = NOW()
         WHERE id = $1
@@ -481,6 +491,8 @@ async function processPreparedDraftRow({ config, generate, row }) {
           result.assistant_message || '',
           JSON.stringify(result.agent_briefing || null),
           JSON.stringify(result.context_summary || null),
+          JSON.stringify(result.context_payload || null),
+          result.context_fingerprint || null,
           JSON.stringify(normalizeArray(result.warnings)),
           result.confidence || 'low',
           result.inserted_at || null
@@ -556,6 +568,8 @@ function enqueueMemoryPreparedDraft(job) {
     assistant_message: '',
     agent_briefing: null,
     context_summary: null,
+    context_payload: null,
+    context_fingerprint: null,
     warnings: [],
     confidence: null,
     failure_reason: null,
@@ -817,6 +831,8 @@ function formatPreparedDraftRow(row = {}) {
     assistant_message: row.assistant_message || '',
     agent_briefing: row.agent_briefing || null,
     context_summary: row.context_summary || null,
+    context_payload: row.context_payload || null,
+    context_fingerprint: clean(row.context_fingerprint) || null,
     warnings: normalizeArray(row.warnings),
     confidence: row.confidence || null,
     failure_reason: row.failure_reason || null,
@@ -832,20 +848,14 @@ function clean(value = '') {
 }
 
 async function withPreparedDraftClient(config, callback) {
-  const { Client } = await import('pg');
-  const client = new Client({
+  return withDatabaseClient({
+    role: 'copilot',
     connectionString: config.copilotDatabaseUrl,
-    ssl: config.copilotDatabaseSsl ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 3000,
-    query_timeout: 10000
-  });
-
-  try {
-    await client.connect();
-    return await callback(client);
-  } finally {
-    await client.end().catch(() => {});
-  }
+    ssl: config.copilotDatabaseSsl,
+    max: config.copilotDatabasePoolSize,
+    connectionTimeoutMs: 3000,
+    queryTimeoutMs: 10000
+  }, callback);
 }
 
 function usesDatabase(config = {}) {

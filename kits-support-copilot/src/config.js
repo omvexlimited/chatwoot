@@ -2,6 +2,7 @@ export function loadConfig(env = process.env) {
   const chatwootBaseUrl = trimTrailingSlash(envValue(env, ['CHATWOOT_BASE_URL']));
   const openaiBaseUrl = trimTrailingSlash(envValue(env, ['OPENAI_BASE_URL'], 'https://api.openai.com'));
   const kitsRepublicDatabaseUrl = envValue(env, ['KITS_REPUBLIC_DATABASE_URL']);
+  const copilotDatabaseUrl = envValue(env, ['COPILOT_DATABASE_URL']) || kitsRepublicDatabaseUrl;
   const shopifyStoreDomain = normalizeShopifyDomain(envValue(env, [
     'SHOPIFY_STORE_DOMAIN',
     'SHOPIFY_SHOP_DOMAIN',
@@ -17,8 +18,13 @@ export function loadConfig(env = process.env) {
     openaiModel: envValue(env, ['OPENAI_MODEL'], 'gpt-5.5'),
     openaiBaseUrl,
     kitsRepublicDatabaseUrl,
-    copilotDatabaseUrl: kitsRepublicDatabaseUrl,
-    copilotDatabaseSsl: envValue(env, ['KITS_REPUBLIC_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
+    copilotDatabaseUrl,
+    copilotDatabaseSsl: envValue(
+      env,
+      ['COPILOT_DATABASE_SSL', 'KITS_REPUBLIC_DATABASE_SSL'],
+      'true'
+    ).toLowerCase() !== 'false',
+    copilotDatabasePoolSize: positiveNumber(envValue(env, ['COPILOT_DATABASE_POOL_SIZE']), 4),
     kitsAdminBaseUrl: trimTrailingSlash(envValue(env, ['KITS_ADMIN_BASE_URL'], 'https://web-production-c1320.up.railway.app')),
     shopifyStoreDomain,
     shopifyAdminAccessToken: envValue(env, ['SHOPIFY_ADMIN_ACCESS_TOKEN', 'SHOPIFY_ADMIN_API_ACCESS_TOKEN']),
@@ -36,6 +42,7 @@ export function loadConfig(env = process.env) {
     krProviderDatabaseUrl: kitsRepublicDatabaseUrl || envValue(env, ['KR_PROVIDER_DATABASE_URL']),
     krProviderStoreId: envValue(env, ['KR_PROVIDER_STORE_ID'], 'kits_republic'),
     krProviderDatabaseSsl: envValue(env, ['KITS_REPUBLIC_DATABASE_SSL', 'KR_PROVIDER_DATABASE_SSL'], 'true').toLowerCase() !== 'false',
+    krDatabasePoolSize: positiveNumber(envValue(env, ['KR_DATABASE_POOL_SIZE']), 4),
     kitsInternalApiToken: envValue(env, ['KITS_INTERNAL_API_TOKEN']),
     playbookKnowledgeCacheMs: Number(envValue(env, ['PLAYBOOK_KNOWLEDGE_CACHE_MS', 'KR_PLAYBOOK_KNOWLEDGE_CACHE_MS'], '300000')),
     playbookKnowledgeTimeoutMs: Number(envValue(env, ['PLAYBOOK_KNOWLEDGE_TIMEOUT_MS', 'KR_PLAYBOOK_KNOWLEDGE_TIMEOUT_MS'], '5000')),
@@ -46,7 +53,12 @@ export function loadConfig(env = process.env) {
     chatwootRequestTimeoutMs: positiveNumber(
       envValue(env, ['CHATWOOT_REQUEST_TIMEOUT_MS']),
       8000
-    )
+    ),
+    progressiveContext: envValue(env, ['COPILOT_PROGRESSIVE_CONTEXT'], 'false').toLowerCase() === 'true',
+    contextCacheTtlMs: positiveNumber(envValue(env, ['COPILOT_CONTEXT_CACHE_TTL_MS']), 300000),
+    contextCacheMaxEntries: positiveNumber(envValue(env, ['COPILOT_CONTEXT_CACHE_MAX_ENTRIES']), 200),
+    preparedDraftWorkerIntervalMs: positiveNumber(envValue(env, ['PREPARED_DRAFT_WORKER_INTERVAL_MS']), 60000),
+    attachmentDownloadTimeoutMs: positiveNumber(envValue(env, ['ATTACHMENT_DOWNLOAD_TIMEOUT_MS']), 5000)
   };
 }
 

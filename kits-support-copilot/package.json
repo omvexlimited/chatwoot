@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "migrate:memories": "node scripts/migrate-copilot-memories.mjs"
   },
   "dependencies": {
     "pg": "^8.13.1"
