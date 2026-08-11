@@ -20,7 +20,7 @@ Recommended:
 - `COPILOT_DATABASE_URL` for memories and prepared drafts. Use a private PostgreSQL instance in the same Railway region. It falls back to `KITS_REPUBLIC_DATABASE_URL` during migration.
 - `COPILOT_DATABASE_SSL=false` for Railway private networking.
 - `COPILOT_PROGRESSIVE_CONTEXT=true` to return core context first and load slower enrichments in the background.
-- `OPENAI_MODEL` defaults to `gpt-5.5`.
+- `OPENAI_MODEL` defaults to `gpt-5.6-luna`.
 - `SHOPIFY_API_VERSION` defaults to `2026-04`.
 
 Performance controls:

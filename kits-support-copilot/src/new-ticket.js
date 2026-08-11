@@ -359,7 +359,7 @@ async function requestIssueProposal({ config, prompt, fallback }) {
         Authorization: `Bearer ${config.openaiApiKey}`
       },
       body: JSON.stringify({
-        model: config.openaiModel || 'gpt-5.5',
+        model: config.openaiModel || 'gpt-5.6-luna',
         input: [
           { role: 'system', content: prompt.system },
           { role: 'user', content: prompt.user }

@@ -15,7 +15,7 @@ export function loadConfig(env = process.env) {
     nodeEnv: envValue(env, ['NODE_ENV'], 'development'),
     copilotApiToken: envValue(env, ['COPILOT_API_TOKEN']),
     openaiApiKey: envValue(env, ['OPENAI_API_KEY']),
-    openaiModel: envValue(env, ['OPENAI_MODEL'], 'gpt-5.5'),
+    openaiModel: envValue(env, ['OPENAI_MODEL'], 'gpt-5.6-luna'),
     openaiBaseUrl,
     kitsRepublicDatabaseUrl,
     copilotDatabaseUrl,
