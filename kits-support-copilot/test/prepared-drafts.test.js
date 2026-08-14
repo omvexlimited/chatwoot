@@ -189,6 +189,14 @@ test('builds actionable agent briefing for size change requests', () => {
       latestMessage: 'Hi, can you switch both shirts to XXL instead of XL?',
       conversationText: '',
       warnings: [],
+      selectedPlaybooks: [
+        {
+          slug: 'pre-shipment-size-change',
+          title: 'Pre-shipment Size Change',
+          case_types: ['size_change_request'],
+          tags: ['size']
+        }
+      ],
       caseReview: {
         summary: 'Customer asks for a size change before shipment.',
         detected_case: 'size_change_request',
@@ -212,14 +220,13 @@ test('builds actionable agent briefing for size change requests', () => {
   });
 
   assert.equal(briefing.detected_case, 'size_change_request');
-  assert.match(briefing.playbook_used, /Size Change/);
-  assert.match(briefing.recommended_decision, /internal change is confirmed/);
-  assert.match(briefing.decision_path.join('\n'), /Customer asks for a size change/);
+  assert.equal(briefing.playbook_used, 'Pre-shipment Size Change');
+  assert.match(briefing.recommended_decision, /published Playbook/);
+  assert.match(briefing.decision_path.join('\n'), /pre-shipment-size-change/);
   assert.match(briefing.verified_facts.join('\n'), /#1001/);
-  assert.equal(briefing.post_send_action, 'dejar_abierto');
+  assert.equal(briefing.post_send_action, 'manual_review');
   assert.equal(briefing.action_required, true);
-  assert.match(briefing.before_sending_checklist.join('\n'), /#1001/);
-  assert.match(briefing.before_sending_checklist.join('\n'), /XL a XXL/);
+  assert.match(briefing.before_sending_checklist.join('\n'), /selected published Playbook/);
 });
 
 test('formats agent briefing for the copilot chat bubble', () => {

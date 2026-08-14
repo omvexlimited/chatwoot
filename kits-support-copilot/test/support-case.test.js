@@ -82,7 +82,7 @@ test('does not detect customs when fulfillment is delivered', () => {
   assert.equal(supportCase, null);
 });
 
-test('does not detect customs when there is no tracking', () => {
+test('uses order update case instead of customs when there is no tracking', () => {
   const context = shopifyContext({ carrier: null, trackingNumber: null });
   const supportCase = detectSupportCase({
     latestMessage: 'Hola, aun no ha llegado el pedido.',
@@ -90,7 +90,22 @@ test('does not detect customs when there is no tracking', () => {
     shopifyContext: context
   });
 
-  assert.equal(supportCase, null);
+  assert.equal(supportCase.type, 'order_update');
+  assert.ok(supportCase.reasons.includes('selected_order_without_tracking'));
+});
+
+test('detects missing and ambiguous order lookups', () => {
+  const noOrder = detectSupportCase({
+    latestMessage: 'Where is my order?',
+    shopifyContext: { selected_order: null, orders: [] }
+  });
+  assert.equal(noOrder.type, 'no_order_found');
+
+  const multipleOrders = detectSupportCase({
+    latestMessage: 'Where is my order?',
+    shopifyContext: { selected_order: null, orders: [{ name: '#1' }, { name: '#2' }] }
+  });
+  assert.equal(multipleOrders.type, 'multiple_orders');
 });
 
 test('detects delay question with fulfilled local-carrier tracking as medium confidence', () => {

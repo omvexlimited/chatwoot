@@ -28,7 +28,7 @@ test('adds public tracking link near sign-off for customs pending drafts', () =>
   });
 
   assert.match(result, /The tracking number is correct\./);
-  assert.match(result, /Thank you for your email\./);
+  assert.doesNotMatch(result, /Thank you for your email\./);
   assert.match(result, /https:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=0141605773793172/);
   assert.ok(result.indexOf('The parcel is going through customs clearance.') < result.indexOf('You can follow the shipment here:'));
   assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('Kind regards,'));
@@ -58,7 +58,7 @@ test('removes em dash punctuation from drafts', () => {
   assert.match(result, /Thank you, we will do that\./);
 });
 
-test('adds warm opening when the draft does not thank the customer', () => {
+test('does not inject support tone into the draft', () => {
   const draft = [
     'Hola,',
     '',
@@ -70,7 +70,7 @@ test('adds warm opening when the draft does not thank the customer', () => {
 
   const result = enforceDraftRequirements({ draft, responseLanguage: { language: 'Spanish' } });
 
-  assert.match(result, /Hola,\n\nMuchas gracias por tu correo\.\n\nHemos revisado tu pedido\./);
+  assert.equal(result, 'Hola,\n\nHemos revisado tu pedido.\n\nUn saludo,\n\nwww.kitsrepublic.com');
 });
 
 test('adds public tracking link when a non-customs draft only includes the tracking number', () => {
@@ -102,27 +102,7 @@ test('adds public tracking link when a non-customs draft only includes the track
   assert.match(result, /https:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=0141605773793172/);
 });
 
-test('adds shipping policy link when delivery times are mentioned', () => {
-  const draft = [
-    'Hola,',
-    '',
-    'El plazo de entrega es de 7-15 días desde la compra.',
-    '',
-    'Un saludo,',
-    'www.kitsrepublic.com'
-  ].join('\n');
-
-  const result = enforceDraftRequirements({
-    draft,
-    responseLanguage: { language: 'Spanish' }
-  });
-
-  assert.match(result, /Política de envíos:/);
-  assert.match(result, /https:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
-  assert.ok(result.indexOf('https://kitsrepublic.com/policies/shipping-policy') < result.indexOf('www.kitsrepublic.com'));
-});
-
-test('adds official timeframes and shipping policy for order update questions', () => {
+test('does not inject timeframes or policy links for order update questions', () => {
   const draft = [
     'Hi Andrew,',
     '',
@@ -148,13 +128,11 @@ test('adds official timeframes and shipping policy for order update questions', 
     }
   });
 
-  assert.match(result, /processing time is 1-3 days/i);
-  assert.match(result, /delivery normally takes 7-15 days from purchase/i);
-  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
-  assert.ok(result.indexOf('Shipping policy:') < result.indexOf('Best regards,'));
+  assert.doesNotMatch(result, /processing time is 1-3 days/i);
+  assert.doesNotMatch(result, /7-15 days|shipping-policy/i);
 });
 
-test('removes processing time from fulfilled tracking update questions', () => {
+test('preserves playbook-authored commercial wording while normalizing tracking', () => {
   const draft = [
     'Hi Mark,',
     '',
@@ -195,14 +173,13 @@ test('removes processing time from fulfilled tracking update questions', () => {
     }
   });
 
-  assert.doesNotMatch(result, /processing time/i);
-  assert.match(result, /Delivery normally takes 7-15 days from purchase\./);
+  assert.match(result, /processing time/i);
+  assert.match(result, /delivery normally takes 7-15 days from purchase\./i);
   assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
-  assert.ok(result.indexOf('This is why the tracking may not show many updates yet.') < result.indexOf('Delivery normally takes 7-15 days from purchase.'));
   assert.ok(result.indexOf('You can follow the shipment here:') < result.indexOf('Best regards,'));
 });
 
-test('adds delivery-only timeframe for fulfilled order update questions', () => {
+test('adds only canonical tracking data for fulfilled order updates', () => {
   const draft = [
     'Hi Mark,',
     '',
@@ -233,11 +210,11 @@ test('adds delivery-only timeframe for fulfilled order update questions', () => 
   });
 
   assert.doesNotMatch(result, /processing time/i);
-  assert.match(result, /Delivery normally takes 7-15 days from purchase\./);
-  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.doesNotMatch(result, /7-15 days|shipping-policy/i);
+  assert.match(result, /https:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=GV501324085GB/);
 });
 
-test('adds refund policy link when returns or exchanges are mentioned', () => {
+test('does not inject a refund policy link for exchanges', () => {
   const draft = [
     'Hi,',
     '',
@@ -249,11 +226,10 @@ test('adds refund policy link when returns or exchanges are mentioned', () => {
 
   const result = enforceDraftRequirements({ draft });
 
-  assert.match(result, /Refund policy:/);
-  assert.match(result, /https:\/\/kitsrepublic\.com\/policies\/refund-policy/);
+  assert.doesNotMatch(result, /Refund policy:|refund-policy/);
 });
 
-test('adds terms privacy and FAQ links when those topics are mentioned', () => {
+test('does not inject terms privacy or FAQ links', () => {
   const draft = [
     'Hi,',
     '',
@@ -269,9 +245,7 @@ test('adds terms privacy and FAQ links when those topics are mentioned', () => {
 
   const result = enforceDraftRequirements({ draft, responseLanguage: { language: 'English' } });
 
-  assert.match(result, /Terms of service:\nhttps:\/\/kitsrepublic\.com\/policies\/terms-of-service/);
-  assert.match(result, /Privacy policy:\nhttps:\/\/kitsrepublic\.com\/policies\/privacy-policy/);
-  assert.match(result, /FAQ \/ Help Center:\nhttps:\/\/kitsrepublic\.com\/pages\/faq-help-center/);
+  assert.doesNotMatch(result, /terms-of-service|privacy-policy|faq-help-center/);
 });
 
 test('deduplicates manually included terms privacy and FAQ links', () => {
@@ -367,7 +341,7 @@ test('adds correct tracking sentence in Spanish when public link already exists'
   assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
 });
 
-test('cleans duplicate tracking links, misplaced shipping policy, and cramped signature', () => {
+test('removes obsolete tournament claims and cleans duplicate tracking links', () => {
   const draft = [
     'Hi Hugo,',
     '',
@@ -408,10 +382,7 @@ test('cleans duplicate tracking links, misplaced shipping policy, and cramped si
   assert.doesNotMatch(result, /www\.17track\.net/);
   assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
   assert.equal((result.match(/kitsrepublic\.com\/policies\/shipping-policy/g) || []).length, 1);
-  assert.ok(
-    result.indexOf('usual delivery timeframe of 7–15 days from purchase.') <
-      result.indexOf('Shipping policy:')
-  );
+  assert.doesNotMatch(result, /World Cup|Mundial|FIFA|7-15 days/);
   assert.ok(
     result.indexOf('Shipping policy:') <
       result.indexOf('Once customs/pre-entry processing is complete')
@@ -664,11 +635,11 @@ test('removes French duplicate timeframe and orphan tracking label', () => {
     }
   });
 
-  assert.equal((result.match(/7 à 15 jours/g) || []).length, 1);
+  assert.equal((result.match(/7 à 15 jours/g) || []).length, 2);
   assert.doesNotMatch(result, /Vous pouvez suivre votre colis ici/);
   assert.equal((result.match(/Vous pouvez suivre l envoi ici:/g) || []).length, 1);
   assert.equal((result.match(/kitsrepublic\.com\/apps\/17TRACK/g) || []).length, 1);
-  assert.match(result, /Politique de livraison:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.doesNotMatch(result, /shipping-policy/);
   assert.match(result, /Cordialement,\n\nwww\.kitsrepublic\.com$/);
 });
 
@@ -710,7 +681,7 @@ test('removes German orphan shipping policy label and keeps tracking before sign
     }
   });
 
-  assert.equal((result.match(/Versandrichtlinie/g) || []).length, 1);
+  assert.equal((result.match(/Versandrichtlinie/g) || []).length, 2);
   assert.match(result, /Versandrichtlinie:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
   assert.equal((result.match(/Sie können die Sendung hier verfolgen:/g) || []).length, 1);
   assert.match(result, /Sie können die Sendung hier verfolgen:\nhttps:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=2764907499000900085000/);
@@ -756,7 +727,7 @@ test('removes Dutch orphan shipping policy label and keeps tracking before sign-
     }
   });
 
-  assert.equal((result.match(/Verzendbeleid/g) || []).length, 1);
+  assert.equal((result.match(/Verzendbeleid/g) || []).length, 2);
   assert.match(result, /Verzendbeleid:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
   assert.equal((result.match(/Je kunt de zending hier volgen:/g) || []).length, 1);
   assert.match(result, /Je kunt de zending hier volgen:\nhttps:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=2764907499000900085000/);
@@ -816,8 +787,7 @@ test('removes false recent-shipment estimate wording when delivery analytics are
 
   assert.doesNotMatch(result, /Based on recent shipments/i);
   assert.doesNotMatch(result, /Royal Mail, this stage usually takes around 7-15 days after dispatch/i);
-  assert.match(result, /Our usual delivery timeframe is 7-15 days from purchase, but it can vary\./);
-  assert.match(result, /Shipping policy:\nhttps:\/\/kitsrepublic\.com\/policies\/shipping-policy/);
+  assert.doesNotMatch(result, /usual delivery timeframe|shipping-policy/i);
 });
 
 test('replaces exact recent-shipment decimal wording when delivery analytics are reliable', () => {
@@ -843,7 +813,7 @@ test('replaces exact recent-shipment decimal wording when delivery analytics are
     }
   });
 
-  assert.match(result, /Based on our recent Royal Mail shipments, this stage usually updates around this point after dispatch/);
+  assert.doesNotMatch(result, /Based on (our )?recent Royal Mail shipments/);
   assert.doesNotMatch(result, /6\.2 days/);
   assert.doesNotMatch(result, /0\.8 days/);
   assert.match(result, /Best,\n\nwww\.kitsrepublic\.com$/);

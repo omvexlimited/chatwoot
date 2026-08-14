@@ -24,7 +24,8 @@ import { extractAgentConfirmedFacts } from './agent-facts.js';
 import { extractAttachmentCandidates } from './attachment-candidates.js';
 import { analyzeAttachmentCandidates } from './attachment-analysis.js';
 import { buildCaseReview, withCaseReviewDraft } from './case-review.js';
-import { createPlaybookKnowledgeProvider } from './playbook-knowledge.js';
+import { createPlaybookKnowledgeProvider, draftForKnowledgeMode } from './playbook-knowledge.js';
+import { buildSelectedKnowledge, selectPlaybooksForCase } from './playbook-coverage.js';
 import { resolveCopilotInteraction } from './agent-intent.js';
 import {
   ensureMemoryTable,
@@ -58,7 +59,6 @@ import {
   buildPrompt,
   conversationToText,
   latestIncomingMessage,
-  loadKnowledgeBase,
   prependSubjectToText
 } from './prompt.js';
 import { generateChatWithOpenAI, generateDraftWithOpenAI } from './openai.js';
@@ -72,8 +72,7 @@ const contextJobs = createContextJobStore({
   ttlMs: config.contextCacheTtlMs,
   maxEntries: config.contextCacheMaxEntries
 });
-const fallbackKnowledgeBase = await loadKnowledgeBase();
-const getKnowledge = createPlaybookKnowledgeProvider({ config, fallbackKnowledgeBase });
+const getKnowledge = createPlaybookKnowledgeProvider({ config });
 await ensureMemoryTable({ config }).catch(error => {
   console.warn(`KR Copilot memory disabled: ${error.message}`);
 });
@@ -221,9 +220,16 @@ async function handleSuggestReply(req, res) {
   fallback.warnings.push(...context.warnings);
 
   const knowledge = await getKnowledge();
+  const selectedPlaybooks = selectPlaybooksForCase(
+    knowledge.playbooks,
+    context.supportCase?.type,
+    context.latestMessage
+  );
   fallback.warnings.push(...(knowledge.warnings || []));
   const prompt = buildPrompt({
-    knowledgeBase: knowledge.markdown,
+    knowledgeBase: buildSelectedKnowledge({ knowledge, selectedPlaybooks }),
+    knowledgeMode: knowledge.mode,
+    selectedPlaybooks,
     conversationText: context.conversationText,
     shopifyContext: context.shopifyContext,
     latestMessage: context.latestMessage,
@@ -239,7 +245,11 @@ async function handleSuggestReply(req, res) {
 
   const result = await generateDraftWithOpenAI({ config, prompt, fallback });
   const draft = enforceDraftRequirements({
-    draft: result.draft,
+    draft: draftForKnowledgeMode({
+      knowledgeMode: knowledge.mode,
+      generatedDraft: result.draft,
+      factsOnlyDraft: fallback.draft
+    }),
     supportCase: context.supportCase,
     shopifyContext: context.shopifyContext,
     responseLanguage: context.responseLanguage,
@@ -575,9 +585,15 @@ async function handleCopilotChat(req, res) {
     latestMessage: context.latestMessage
   });
   const knowledge = await getKnowledge();
+  const selectedPlaybooks = selectPlaybooksForCase(
+    knowledge.playbooks,
+    context.supportCase?.type,
+    [context.latestMessage, ...chatMessages.slice(-3).map(message => message.content)].filter(Boolean).join('\n')
+  );
+  const knowledgeContext = { ...context, selectedPlaybooks };
   fallbackDraft.warnings.push(...context.warnings, ...memoryResult.warnings, ...(knowledge.warnings || []));
   const fallbackBriefing = buildAgentBriefing({
-    context,
+    context: knowledgeContext,
     result: {
       reasoning_summary: fallbackDraft.reasoning_summary,
       warnings: fallbackDraft.warnings
@@ -618,7 +634,9 @@ async function handleCopilotChat(req, res) {
     };
 
   const prompt = buildCopilotChatPrompt({
-    knowledgeBase: knowledge.markdown,
+    knowledgeBase: buildSelectedKnowledge({ knowledge, selectedPlaybooks }),
+    knowledgeMode: knowledge.mode,
+    selectedPlaybooks,
     conversationText: context.conversationText,
     shopifyContext: context.shopifyContext,
     latestMessage: context.latestMessage,
@@ -666,7 +684,7 @@ async function handleCopilotChat(req, res) {
   if (briefOnly) {
     const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...(knowledge.warnings || [])]);
     const agentBriefing = normalizeAgentBriefing(result.agent_briefing, {
-      context,
+      context: knowledgeContext,
       result: {
         ...result,
         draft: currentDraft,
@@ -691,7 +709,11 @@ async function handleCopilotChat(req, res) {
   }
 
   const draft = enforceDraftRequirements({
-    draft: result.draft,
+    draft: draftForKnowledgeMode({
+      knowledgeMode: knowledge.mode,
+      generatedDraft: result.draft,
+      factsOnlyDraft: fallbackDraft.draft
+    }),
     supportCase: context.supportCase,
     shopifyContext: context.shopifyContext,
     responseLanguage: effectiveResponseLanguage,
@@ -700,7 +722,7 @@ async function handleCopilotChat(req, res) {
   });
   const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...(knowledge.warnings || [])]);
   const agentBriefing = normalizeAgentBriefing(result.agent_briefing, {
-    context,
+    context: knowledgeContext,
     result: {
       ...result,
       draft,
@@ -1348,10 +1370,16 @@ async function generatePreparedDraftForJob(row) {
     latestMessage: context.latestMessage
   });
   const knowledge = await getKnowledge();
+  const selectedPlaybooks = selectPlaybooksForCase(
+    knowledge.playbooks,
+    context.supportCase?.type,
+    context.latestMessage
+  );
+  const knowledgeContext = { ...context, selectedPlaybooks };
   fallbackDraft.warnings.push(...context.warnings, ...memoryResult.warnings, ...(knowledge.warnings || []));
 
   const fallbackBriefing = buildAgentBriefing({
-    context,
+    context: knowledgeContext,
     result: {
       reasoning_summary: fallbackDraft.reasoning_summary,
       warnings: fallbackDraft.warnings
@@ -1366,13 +1394,17 @@ async function generatePreparedDraftForJob(row) {
     warnings: fallbackDraft.warnings
   };
   const prompt = buildPreparedDraftPrompt({
-    context,
+    context: knowledgeContext,
     approvedMemories: memoryResult.memories,
-    knowledgeBase: knowledge.markdown
+    knowledge
   });
   const result = await generateChatWithOpenAI({ config, prompt, fallback });
   const draft = enforceDraftRequirements({
-    draft: result.draft,
+    draft: draftForKnowledgeMode({
+      knowledgeMode: knowledge.mode,
+      generatedDraft: result.draft,
+      factsOnlyDraft: fallbackDraft.draft
+    }),
     supportCase: context.supportCase,
     shopifyContext: context.shopifyContext,
     responseLanguage: context.responseLanguage,
@@ -1381,7 +1413,7 @@ async function generatePreparedDraftForJob(row) {
   });
   const warnings = uniqueStrings([...(result.warnings || []), ...memoryResult.warnings, ...(knowledge.warnings || []), ...context.warnings]);
   const agentBriefing = normalizeAgentBriefing(result.agent_briefing, {
-    context,
+    context: knowledgeContext,
     result: {
       ...result,
       draft,
@@ -1455,9 +1487,11 @@ async function writePreparedDraftToChatwoot({ row, draft }) {
   }
 }
 
-function buildPreparedDraftPrompt({ context, approvedMemories = [], knowledgeBase }) {
+function buildPreparedDraftPrompt({ context, approvedMemories = [], knowledge }) {
   const prompt = buildPrompt({
-    knowledgeBase,
+    knowledgeBase: buildSelectedKnowledge({ knowledge, selectedPlaybooks: context.selectedPlaybooks }),
+    knowledgeMode: knowledge.mode,
+    selectedPlaybooks: context.selectedPlaybooks,
     conversationText: context.conversationText,
     shopifyContext: context.shopifyContext,
     latestMessage: context.latestMessage,

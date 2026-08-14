@@ -112,10 +112,6 @@ Que responder:
 - Processing 1-3 dias.
 - Tracking cuando salga.
 
-Anadir:
-
-World Cup -> alta demanda.
-
 Ejemplos:
 
 #2083
@@ -155,8 +151,6 @@ Que decir:
 "El estado 'Pendiente de recepcion en CTT Express' significa que CTT todavia no ha recibido fisicamente el paquete y esta esperando a que finalice el proceso previo de entrada en su red."
 
 "Esta fuera de nuestro control."
-
-"Las aduanas estan mas lentas debido al Mundial."
 
 "No deberia faltar mucho."
 

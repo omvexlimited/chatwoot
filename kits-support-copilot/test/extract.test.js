@@ -10,7 +10,7 @@ test('extracts emails and explicit order refs', () => {
 });
 
 test('does not treat bare years as order refs', () => {
-  const result = extractIdentifiers('Oyeeee, se acaba el Mundial 2026 y sigo sin recibir las camisetas.');
+  const result = extractIdentifiers('Oyeeee, llevo varias semanas y sigo sin recibir las camisetas.');
   assert.deepEqual(result.orderRefs, []);
 });
 

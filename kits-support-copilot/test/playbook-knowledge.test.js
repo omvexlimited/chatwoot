@@ -2,71 +2,59 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   createPlaybookKnowledgeProvider,
+  draftForKnowledgeMode,
   fetchPublishedPlaybookKnowledge
 } from '../src/playbook-knowledge.js';
 
-test('loads published playbook knowledge from Kits admin API', async () => {
+test('loads complete published playbook knowledge from Kits admin API', async () => {
   const calls = [];
   const knowledge = await fetchPublishedPlaybookKnowledge({
     config: {
       kitsAdminBaseUrl: 'https://admin.example.test',
       kitsInternalApiToken: 'secret'
     },
-    fallbackKnowledgeBase: 'Fallback guide',
+    requiredPlaybookSlugs: ['returns'],
+    requiredCaseTypes: ['return_request'],
     now: () => Date.parse('2026-07-01T08:00:00Z'),
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
-      return jsonResponse({
-        ok: true,
-        source: 'kits_republic_playbooks',
-        version: '2026-07-01T07:55:00Z',
-        knowledge_markdown: '## Returns\n\nReturn SOP.',
-        playbooks: [{ id: 'returns', title: 'Returns' }]
-      });
+      return jsonResponse(publishedResponse('v1'));
     }
   });
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://admin.example.test/internal/kits-republic/playbooks/knowledge');
   assert.equal(calls[0].options.headers.Authorization, 'Bearer secret');
+  assert.equal(knowledge.mode, 'published');
   assert.equal(knowledge.source, 'kits_republic_playbooks');
-  assert.equal(knowledge.version, '2026-07-01T07:55:00Z');
+  assert.equal(knowledge.version, 'v1');
+  assert.equal(knowledge.coverage.complete, true);
   assert.deepEqual(knowledge.warnings, []);
   assert.match(knowledge.markdown, /Knowledge source: Kits Republic Playbooks/);
-  assert.match(knowledge.markdown, /Version: 2026-07-01T07:55:00Z/);
-  assert.match(knowledge.markdown, /Published playbooks: 1/);
-  assert.match(knowledge.markdown, /Published Playbook Index/);
-  assert.match(knowledge.markdown, /Returns/);
-  assert.match(knowledge.markdown, /## Returns/);
-  assert.doesNotMatch(knowledge.markdown, /Fallback guide/);
+  assert.match(knowledge.markdown, /Return SOP/);
 });
 
-test('uses local fallback when Kits admin API is not configured', async () => {
-  const knowledge = await fetchPublishedPlaybookKnowledge({
+test('uses facts_only when no published knowledge has ever loaded', async () => {
+  const notConfigured = await fetchPublishedPlaybookKnowledge({
     config: {},
-    fallbackKnowledgeBase: 'Local guide'
+    requiredPlaybookSlugs: ['returns'],
+    requiredCaseTypes: ['return_request']
   });
+  assert.equal(notConfigured.mode, 'facts_only');
+  assert.equal(notConfigured.source, 'none');
+  assert.match(notConfigured.markdown, /No commercial policy is available/);
+  assert.doesNotMatch(notConfigured.markdown, /Local guide|fallback markdown/i);
 
-  assert.equal(knowledge.source, 'local_fallback_markdown');
-  assert.match(knowledge.markdown, /Knowledge source: local fallback markdown/);
-  assert.match(knowledge.markdown, /admin_api_not_configured/);
-  assert.match(knowledge.markdown, /Local guide/);
-  assert.match(knowledge.warnings[0], /admin_api_not_configured/);
-});
-
-test('uses local fallback when Kits admin API fails or returns empty knowledge', async () => {
   const failed = await fetchPublishedPlaybookKnowledge({
     config: {
       kitsAdminBaseUrl: 'https://admin.example.test',
       kitsInternalApiToken: 'secret'
     },
-    fallbackKnowledgeBase: 'Local guide',
+    requiredPlaybookSlugs: ['returns'],
+    requiredCaseTypes: ['return_request'],
     fetchImpl: async () => jsonResponse({ ok: false, error: 'nope' }, 500)
   });
-
-  assert.match(failed.markdown, /local fallback markdown/);
-  assert.match(failed.markdown, /admin_api_failed: nope/);
-  assert.match(failed.markdown, /Local guide/);
+  assert.equal(failed.mode, 'facts_only');
   assert.match(failed.warnings[0], /admin_api_failed: nope/);
 
   const empty = await fetchPublishedPlaybookKnowledge({
@@ -74,80 +62,116 @@ test('uses local fallback when Kits admin API fails or returns empty knowledge',
       kitsAdminBaseUrl: 'https://admin.example.test',
       kitsInternalApiToken: 'secret'
     },
-    fallbackKnowledgeBase: 'Local guide',
+    requiredPlaybookSlugs: ['returns'],
+    requiredCaseTypes: ['return_request'],
     fetchImpl: async () => jsonResponse({ ok: true, knowledge_markdown: '' })
   });
-
-  assert.match(empty.markdown, /admin_api_returned_empty_knowledge/);
-  assert.match(empty.markdown, /Local guide/);
+  assert.equal(empty.mode, 'facts_only');
+  assert.match(empty.warnings[0], /admin_api_returned_empty_knowledge/);
 });
 
-test('caches playbook knowledge for a short window', async () => {
-  let currentTime = 1000;
-  let calls = 0;
-  const getKnowledge = createPlaybookKnowledgeProvider({
-    config: {
-      kitsAdminBaseUrl: 'https://admin.example.test',
-      kitsInternalApiToken: 'secret',
-      playbookKnowledgeCacheMs: 100
-    },
-    fallbackKnowledgeBase: 'Local guide',
-    now: () => currentTime,
-    fetchImpl: async () => {
-      calls += 1;
-      return jsonResponse({
-        ok: true,
-        version: `v${calls}`,
-        knowledge_markdown: `## Playbook ${calls}`,
-        playbooks: []
-      });
-    }
+test('rejects published knowledge with missing playbooks or compiled content', async () => {
+  const missingPlaybook = await fetchPublishedPlaybookKnowledge({
+    config: configuredAdmin(),
+    requiredPlaybookSlugs: ['returns', 'duplicate-conversation'],
+    requiredCaseTypes: ['return_request'],
+    fetchImpl: async () => jsonResponse(publishedResponse('missing'))
   });
+  assert.equal(missingPlaybook.mode, 'facts_only');
+  assert.deepEqual(missingPlaybook.coverage.missing_slugs, ['duplicate-conversation']);
 
-  assert.match((await getKnowledge()).markdown, /Playbook 1/);
-  currentTime = 1050;
-  assert.match((await getKnowledge()).markdown, /Playbook 1/);
-  currentTime = 1150;
-  assert.match((await getKnowledge()).markdown, /Playbook 2/);
-  assert.equal(calls, 2);
+  const missingContent = await fetchPublishedPlaybookKnowledge({
+    config: configuredAdmin(),
+    requiredPlaybookSlugs: ['returns'],
+    requiredCaseTypes: ['return_request'],
+    fetchImpl: async () => jsonResponse({
+      ...publishedResponse('missing-content'),
+      playbooks: [{ slug: 'returns', title: 'Returns', case_types: ['return_request'], knowledge_markdown: '' }]
+    })
+  });
+  assert.equal(missingContent.mode, 'facts_only');
+  assert.deepEqual(missingContent.coverage.missing_content_slugs, ['returns']);
 });
 
-test('uses stale playbook knowledge when a refresh fails after a successful load', async () => {
+test('caches published knowledge and uses stale_published after a failed refresh', async () => {
   let currentTime = 1000;
   let calls = 0;
+  const log = [];
   const getKnowledge = createPlaybookKnowledgeProvider({
     config: {
-      kitsAdminBaseUrl: 'https://admin.example.test',
-      kitsInternalApiToken: 'secret',
+      ...configuredAdmin(),
       playbookKnowledgeCacheMs: 100
     },
-    fallbackKnowledgeBase: 'Local guide',
+    requiredPlaybookSlugs: ['returns'],
+    requiredCaseTypes: ['return_request'],
+    logger: {
+      info: message => log.push(message),
+      warn: message => log.push(message)
+    },
     now: () => currentTime,
     fetchImpl: async () => {
       calls += 1;
-      if (calls === 1) {
-        return jsonResponse({
-          ok: true,
-          version: 'fresh',
-          knowledge_markdown: '## Fresh Playbook',
-          playbooks: []
-        });
-      }
+      if (calls === 1) return jsonResponse(publishedResponse('fresh'));
       throw new Error('network down');
     }
   });
 
   const fresh = await getKnowledge();
-  assert.match(fresh.markdown, /Fresh Playbook/);
-  assert.deepEqual(fresh.warnings, []);
+  assert.equal(fresh.mode, 'published');
+  currentTime = 1050;
+  assert.equal((await getKnowledge()).mode, 'published');
+  assert.equal(calls, 1);
 
   currentTime = 1200;
   const stale = await getKnowledge();
-  assert.match(stale.markdown, /Fresh Playbook/);
+  assert.equal(stale.mode, 'stale_published');
+  assert.match(stale.markdown, /Return SOP/);
   assert.match(stale.warnings.join('\n'), /network down/);
-  assert.match(stale.warnings.join('\n'), /last successfully loaded Playbooks/);
+  assert.match(stale.warnings.join('\n'), /last successfully loaded published Playbook knowledge/);
   assert.equal(calls, 2);
+  assert.equal(log.length, 2);
+  assert.match(log[0], /mode=published.*coverage=complete/);
+  assert.match(log[1], /mode=stale_published.*network down/);
 });
+
+test('forces the verified neutral draft when knowledge is facts_only', () => {
+  assert.equal(draftForKnowledgeMode({
+    knowledgeMode: 'facts_only',
+    generatedDraft: 'Returns are free for 60 days and include a coupon.',
+    factsOnlyDraft: 'Order #1001 is currently unfulfilled.'
+  }), 'Order #1001 is currently unfulfilled.');
+
+  assert.equal(draftForKnowledgeMode({
+    knowledgeMode: 'stale_published',
+    generatedDraft: 'Draft backed by the cached published Playbook.',
+    factsOnlyDraft: 'Neutral fallback.'
+  }), 'Draft backed by the cached published Playbook.');
+});
+
+function configuredAdmin() {
+  return {
+    kitsAdminBaseUrl: 'https://admin.example.test',
+    kitsInternalApiToken: 'secret'
+  };
+}
+
+function publishedResponse(version) {
+  return {
+    ok: true,
+    source: 'kits_republic_playbooks',
+    version,
+    knowledge_markdown: '## Returns\n\nReturn SOP.',
+    playbooks: [
+      {
+        slug: 'returns',
+        title: 'Returns',
+        case_types: ['return_request'],
+        tags: ['returns'],
+        knowledge_markdown: '## Returns\n\nReturn SOP.'
+      }
+    ]
+  };
+}
 
 function jsonResponse(body, status = 200) {
   return {

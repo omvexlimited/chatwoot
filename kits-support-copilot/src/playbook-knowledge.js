@@ -1,13 +1,19 @@
+import { REQUIRED_PLAYBOOK_SLUGS, validatePlaybookCoverage } from './playbook-coverage.js';
+import { SUPPORT_CASE_TYPES } from './support-case.js';
+
 const DEFAULT_CACHE_MS = 300_000;
 const DEFAULT_TIMEOUT_MS = 5_000;
 
 export function createPlaybookKnowledgeProvider({
   config = {},
-  fallbackKnowledgeBase = '',
   fetchImpl = globalThis.fetch,
-  now = () => Date.now()
+  now = () => Date.now(),
+  requiredPlaybookSlugs = REQUIRED_PLAYBOOK_SLUGS,
+  requiredCaseTypes = SUPPORT_CASE_TYPES,
+  logger = console
 } = {}) {
   let cache = null;
+  let reportedState = '';
   const cacheMs = Number(config.playbookKnowledgeCacheMs || DEFAULT_CACHE_MS);
 
   return async function getPlaybookKnowledge() {
@@ -15,25 +21,39 @@ export function createPlaybookKnowledgeProvider({
 
     const result = await fetchPublishedPlaybookKnowledge({
       config,
-      fallbackKnowledgeBase,
       fetchImpl,
       now,
-      staleKnowledge: cache
+      staleKnowledge: cache,
+      requiredPlaybookSlugs,
+      requiredCaseTypes
     });
     cache = result;
+    const state = `${result.mode}:${result.version}:${result.warnings?.[0] || ''}`;
+    if (state !== reportedState) {
+      const message = [
+        `KR Copilot knowledge mode=${result.mode}`,
+        `version=${result.version}`,
+        `playbooks=${result.playbook_count}`,
+        `coverage=${result.coverage?.complete === true ? 'complete' : 'incomplete'}`
+      ].join(' ');
+      if (result.mode === 'published') logger?.info?.(message);
+      else logger?.warn?.(`${message} warning=${result.warnings?.[0] || 'unknown'}`);
+      reportedState = state;
+    }
     return result;
   };
 }
 
 export async function fetchPublishedPlaybookKnowledge({
   config = {},
-  fallbackKnowledgeBase = '',
   fetchImpl = globalThis.fetch,
   now = () => Date.now(),
-  staleKnowledge = null
+  staleKnowledge = null,
+  requiredPlaybookSlugs = REQUIRED_PLAYBOOK_SLUGS,
+  requiredCaseTypes = SUPPORT_CASE_TYPES
 } = {}) {
   if (!config.kitsAdminBaseUrl || !config.kitsInternalApiToken || typeof fetchImpl !== 'function') {
-    return fallbackKnowledge({ fallbackKnowledgeBase, reason: 'admin_api_not_configured', now });
+    return unavailableKnowledge({ reason: 'admin_api_not_configured', now, staleKnowledge, requiredPlaybookSlugs, requiredCaseTypes });
   }
 
   try {
@@ -57,15 +77,31 @@ export async function fetchPublishedPlaybookKnowledge({
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok === false) {
       const message = data.error || `HTTP ${response.status}`;
-      return fallbackKnowledge({ fallbackKnowledgeBase, reason: `admin_api_failed: ${message}`, now, staleKnowledge });
+      return unavailableKnowledge({ reason: `admin_api_failed: ${message}`, now, staleKnowledge, requiredPlaybookSlugs, requiredCaseTypes });
     }
 
     const knowledgeMarkdown = String(data.knowledge_markdown || '').trim();
     if (!knowledgeMarkdown) {
-      return fallbackKnowledge({ fallbackKnowledgeBase, reason: 'admin_api_returned_empty_knowledge', now, staleKnowledge });
+      return unavailableKnowledge({ reason: 'admin_api_returned_empty_knowledge', now, staleKnowledge, requiredPlaybookSlugs, requiredCaseTypes });
     }
 
     const playbooks = Array.isArray(data.playbooks) ? data.playbooks : [];
+    const coverage = validatePlaybookCoverage(playbooks, requiredPlaybookSlugs, requiredCaseTypes);
+    if (!coverage.complete) {
+      const missingCoverage = [
+        ...coverage.missing_slugs,
+        ...coverage.missing_content_slugs.map(slug => `${slug}:content`),
+        ...coverage.missing_case_types.map(caseType => `${caseType}:case_type`)
+      ];
+      return unavailableKnowledge({
+        reason: `playbook_coverage_incomplete: ${missingCoverage.join(', ')}`,
+        now,
+        staleKnowledge,
+        coverage,
+        requiredPlaybookSlugs,
+        requiredCaseTypes
+      });
+    }
     const markdown = [
       '# Knowledge source: Kits Republic Playbooks',
       '',
@@ -82,51 +118,75 @@ export async function fetchPublishedPlaybookKnowledge({
     ].join('\n');
     return {
       markdown,
+      knowledge_markdown: knowledgeMarkdown,
       source: data.source || 'kits_republic_playbooks',
+      mode: 'published',
       version: String(data.version || data.updated_at || 'unknown'),
       updated_at: data.updated_at || data.version || null,
       loadedAt: now(),
       loaded_at: new Date(now()).toISOString(),
       playbook_count: playbooks.length,
+      playbooks,
+      coverage,
       warnings: []
     };
   } catch (error) {
-    return fallbackKnowledge({ fallbackKnowledgeBase, reason: `admin_api_exception: ${error.message}`, now, staleKnowledge });
+    return unavailableKnowledge({
+      reason: `admin_api_exception: ${error.message}`,
+      now,
+      staleKnowledge,
+      requiredPlaybookSlugs,
+      requiredCaseTypes
+    });
   }
 }
 
-function fallbackKnowledge({
-  fallbackKnowledgeBase = '',
+export function draftForKnowledgeMode({ knowledgeMode, generatedDraft = '', factsOnlyDraft = '' } = {}) {
+  return knowledgeMode === 'facts_only' ? factsOnlyDraft : generatedDraft;
+}
+
+function unavailableKnowledge({
   reason = 'unknown',
   now = () => Date.now(),
-  staleKnowledge = null
+  staleKnowledge = null,
+  coverage = null,
+  requiredPlaybookSlugs = REQUIRED_PLAYBOOK_SLUGS,
+  requiredCaseTypes = SUPPORT_CASE_TYPES
 } = {}) {
-  const warning = `Playbook knowledge fallback used: ${reason}`;
-  if (staleKnowledge?.markdown) {
+  const warning = `Published Playbook knowledge unavailable: ${reason}`;
+  if (['published', 'stale_published'].includes(staleKnowledge?.mode) && staleKnowledge?.markdown) {
     return {
       ...staleKnowledge,
+      mode: 'stale_published',
       loadedAt: now(),
       loaded_at: new Date(now()).toISOString(),
-      warnings: uniqueStrings([...(staleKnowledge.warnings || []), warning, 'Using the last successfully loaded Playbooks knowledge.'])
+      warnings: uniqueStrings([...(staleKnowledge.warnings || []), warning, 'Using the last successfully loaded published Playbook knowledge.'])
     };
   }
 
   const markdown = [
-    '# Knowledge source: local fallback markdown',
+    '# Published Playbook knowledge unavailable',
     '',
+    '- Mode: facts_only',
     `- Reason: ${reason}`,
     `- Loaded at: ${new Date(now()).toISOString()}`,
     '',
-    String(fallbackKnowledgeBase || '').trim()
+    'No commercial policy is available for this request.',
+    'Use only verified facts from the conversation, Shopify, tracking, attachments, and agent-confirmed completed actions.',
+    'Do not state causes, policy timeframes, return conditions, compensation, coupon codes, or other commercial rules.'
   ].join('\n').trim();
   return {
     markdown,
-    source: 'local_fallback_markdown',
-    version: 'local',
+    knowledge_markdown: '',
+    source: 'none',
+    mode: 'facts_only',
+    version: 'unavailable',
     updated_at: null,
     loadedAt: now(),
     loaded_at: new Date(now()).toISOString(),
     playbook_count: 0,
+    playbooks: [],
+    coverage: coverage || validatePlaybookCoverage([], requiredPlaybookSlugs, requiredCaseTypes),
     warnings: [warning]
   };
 }

@@ -1,102 +1,20 @@
 import { buildPublicTrackingUrl, firstTrackingNumberFromShopifyContext } from './tracking-url.js';
-import { buildDeliveryTimingGuidance } from './delivery-guidance.js';
-
-const POLICY_LINKS = {
-  shipping: 'https://kitsrepublic.com/policies/shipping-policy',
-  refund: 'https://kitsrepublic.com/policies/refund-policy',
-  sizeGuide: 'https://kitsrepublic.com/pages/size-guide',
-  terms: 'https://kitsrepublic.com/policies/terms-of-service',
-  privacy: 'https://kitsrepublic.com/policies/privacy-policy',
-  faqHelp: 'https://kitsrepublic.com/pages/faq-help-center'
-};
-
-const POLICY_LABELS = {
-  shipping: {
-    English: 'Shipping policy:',
-    Spanish: 'Política de envíos:',
-    Catalan: 'Política d enviaments:',
-    French: 'Politique de livraison:',
-    German: 'Versandrichtlinie:',
-    Italian: 'Politica di spedizione:',
-    Portuguese: 'Politica de envio:',
-    Dutch: 'Verzendbeleid:'
-  },
-  refund: {
-    English: 'Refund policy:',
-    Spanish: 'Política de devoluciones:',
-    Catalan: 'Política de devolucions:',
-    French: 'Politique de retour:',
-    German: 'Rückerstattungsrichtlinie:',
-    Italian: 'Politica di reso:',
-    Portuguese: 'Politica de reembolso:',
-    Dutch: 'Retourbeleid:'
-  },
-  sizeGuide: {
-    English: 'Size guide:',
-    Spanish: 'Guía de tallas:',
-    Catalan: 'Guia de talles:',
-    French: 'Guide des tailles:',
-    German: 'Größentabelle:',
-    Italian: 'Guida alle taglie:',
-    Portuguese: 'Guia de tamanhos:',
-    Dutch: 'Maattabel:'
-  },
-  terms: {
-    English: 'Terms of service:',
-    Spanish: 'Términos del servicio:',
-    Catalan: 'Termes del servei:',
-    French: 'Conditions de service:',
-    German: 'Nutzungsbedingungen:',
-    Italian: 'Termini di servizio:',
-    Portuguese: 'Termos de serviço:',
-    Dutch: 'Servicevoorwaarden:'
-  },
-  privacy: {
-    English: 'Privacy policy:',
-    Spanish: 'Política de privacidad:',
-    Catalan: 'Política de privacitat:',
-    French: 'Politique de confidentialité:',
-    German: 'Datenschutzrichtlinie:',
-    Italian: 'Informativa sulla privacy:',
-    Portuguese: 'Política de privacidade:',
-    Dutch: 'Privacybeleid:'
-  },
-  faqHelp: {
-    English: 'FAQ / Help Center:',
-    Spanish: 'FAQ / Centro de ayuda:',
-    Catalan: 'FAQ / Centre d ajuda:',
-    French: 'FAQ / Centre d aide:',
-    German: 'FAQ / Hilfezentrum:',
-    Italian: 'FAQ / Centro assistenza:',
-    Portuguese: 'FAQ / Centro de ajuda:',
-    Dutch: 'FAQ / Helpcentrum:'
-  }
-};
-
-const STANDALONE_POLICY_LABELS = new Set(
-  Object.values(POLICY_LABELS)
-    .flatMap(labels => Object.values(labels))
-    .flatMap(label => [label, label.replace(/:$/, '')])
-    .map(normalizePolicyLabel)
-);
 
 export function enforceDraftRequirements({
   draft = '',
   supportCase,
   shopifyContext = {},
   responseLanguage,
-  deliveryEstimateContext,
-  latestMessage = ''
+  deliveryEstimateContext
 } = {}) {
   const text = String(draft || '').trim();
   if (!text) return String(draft || '');
 
   let normalizedText = normalizeDraftFormatting(text);
+  normalizedText = removeObsoleteTournamentClaims(normalizedText);
   const language = responseLanguage?.language || inferLanguageFromDraft(normalizedText);
   const trackingNumber = firstTrackingNumberFromShopifyContext(shopifyContext);
   const trackingUrl = buildPublicTrackingUrl(trackingNumber);
-
-  normalizedText = ensureWarmOpening(normalizedText, language);
 
   if (trackingUrl) {
     normalizedText = canonicalizeTrackingLinks(normalizedText, trackingUrl);
@@ -114,17 +32,16 @@ export function enforceDraftRequirements({
   }
 
   normalizedText = enforceDeliveryEstimateClaims(normalizedText, deliveryEstimateContext, language);
-  normalizedText = removeProcessingTimeForShippedOrders(normalizedText, language, shopifyContext);
-  normalizedText = ensureOrderStatusTimeframes({
-    text: normalizedText,
-    language,
-    latestMessage,
-    shopifyContext
-  });
-  normalizedText = dedupeDeliveryTimeframeParagraphs(normalizedText);
-  normalizedText = applyRequiredPolicyLinks(normalizedText, language);
   if (trackingUrl) normalizedText = moveTrackingBlockBeforeSignature(normalizedText, trackingUrl, language);
   return normalizeDraftFormatting(normalizedText);
+}
+
+function removeObsoleteTournamentClaims(text) {
+  const tournamentTerms = '(?:world\\s+cup|mundial|fifa|coupe\\s+du\\s+monde|weltmeisterschaft|coppa\\s+del\\s+mondo|copa\\s+do\\s+mundo|wereldkampioenschap)';
+  const sentencePattern = new RegExp(`[^.!?\\n]*${tournamentTerms}[^.!?\\n]*[.!?]?`, 'gi');
+  return normalizeBlankLines(
+    text.split('\n').map(line => line.replace(sentencePattern, '').trim()).join('\n')
+  );
 }
 
 function canonicalizeTrackingLinks(text, trackingUrl) {
@@ -171,9 +88,9 @@ function normalizeKnownLabelUrlBlockSpacing(text) {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (isStandaloneTrackingLabel(line) || isStandalonePolicyLabel(line)) {
+    if (isStandaloneTrackingLabel(line)) {
       const nextIndex = nextNonBlankLineIndex(lines, index + 1);
-      if (nextIndex !== -1 && isKnownPublicUrl(lines[nextIndex])) {
+      if (nextIndex !== -1 && /^https?:\/\//i.test(lines[nextIndex].trim())) {
         result.push(ensureTrailingColon(line.trim()));
         result.push(lines[nextIndex].trim());
         index = nextIndex;
@@ -184,41 +101,6 @@ function normalizeKnownLabelUrlBlockSpacing(text) {
   }
 
   return normalizeBlankLines(result.join('\n'));
-}
-
-function ensureWarmOpening(text, language) {
-  if (hasThanksText(text)) return text;
-  return insertAfterGreetingOrAtStart(text, thankYouSentence(language));
-}
-
-function hasThanksText(text) {
-  return /\b(thank you|thanks|gracias|moltes gr[aà]cies|merci|danke|vielen dank|grazie|obrigad[oa]|bedankt)\b/i.test(text);
-}
-
-function thankYouSentence(language) {
-  return copyForLanguage(language, {
-    English: 'Thank you for your email.',
-    Spanish: 'Muchas gracias por tu correo.',
-    Catalan: 'Moltes gràcies pel teu missatge.',
-    French: 'Merci beaucoup pour votre message.',
-    German: 'Vielen Dank für Ihre Nachricht.',
-    Italian: 'Grazie mille per il tuo messaggio.',
-    Portuguese: 'Muito obrigado pela tua mensagem.',
-    Dutch: 'Bedankt voor je bericht.'
-  });
-}
-
-function insertAfterGreetingOrAtStart(text, block) {
-  const lines = text.split('\n');
-  const firstTextIndex = lines.findIndex(line => line.trim());
-  let insertIndex = firstTextIndex;
-  if (firstTextIndex === -1) {
-    insertIndex = 0;
-  } else if (isGreetingLine(lines[firstTextIndex])) {
-    insertIndex = firstTextIndex + 1;
-  }
-  lines.splice(insertIndex, 0, '', block, '');
-  return normalizeBlankLines(lines.join('\n'));
 }
 
 function trackingBlock({ draft, trackingNumber, trackingUrl, language, supportCase }) {
@@ -310,30 +192,18 @@ function removeRedundantTrackingNumberLines(text, trackingNumber, trackingUrl) {
   return normalizeBlankLines(text.split('\n').filter(line => !pattern.test(line.trim())).join('\n'));
 }
 
-function enforceDeliveryEstimateClaims(text, deliveryEstimateContext, language) {
-  const guidance = buildDeliveryTimingGuidance(deliveryEstimateContext);
-  const safeText = removeExactTimingClaims(text, guidance, language);
+function enforceDeliveryEstimateClaims(text, deliveryEstimateContext) {
+  const safeText = removeExactTimingClaims(text);
   if (hasReliableDeliveryEstimate(deliveryEstimateContext)) return safeText;
-
-  const neutralTimeframe = copyForLanguage(language, {
-    English: 'Our usual delivery timeframe is 7-15 days from purchase, but it can vary.',
-    Spanish: 'Nuestro plazo habitual de entrega es de 7-15 días desde la compra, aunque puede variar.',
-    Catalan: 'El nostre termini habitual d entrega és de 7-15 dies des de la compra, tot i que pot variar.',
-    French: 'Notre délai de livraison habituel est de 7 à 15 jours à partir de l achat, mais il peut varier.',
-    German: 'Unsere übliche Lieferzeit beträgt 7-15 Tage ab Kaufdatum, kann aber variieren.',
-    Italian: 'Il nostro tempo di consegna abituale è di 7-15 giorni dall acquisto, ma può variare.',
-    Portuguese: 'O nosso prazo habitual de entrega é de 7-15 dias a partir da compra, mas pode variar.',
-    Dutch: 'Onze gebruikelijke levertijd is 7-15 dagen vanaf aankoop, maar dit kan varieren.'
-  });
 
   let value = safeText.replace(
     /\b(?:Based on recent shipments with|Based on recent deliveries with|Based on recent carrier data for)\s+[^.\n]+\.?/gi,
-    sentence => (/\b7\s*[–-]\s*15\b/i.test(sentence) ? neutralTimeframe : '')
+    ''
   );
 
   value = value.replace(
-    /\b(?:Seg[uú]n|Basado en|Basandonos en|Basándonos en)\s+(?:env[ií]os|entregas)\s+recientes[^.\n]*\b7\s*[–-]\s*15\s+d[ií]as[^.\n]*\.?/gi,
-    neutralTimeframe
+    /\b(?:Seg[uú]n|Basado en|Basandonos en|Basándonos en)\s+(?:env[ií]os|entregas)\s+recientes[^.\n]*\.?/gi,
+    ''
   );
 
   value = value.replace(
@@ -345,118 +215,7 @@ function enforceDeliveryEstimateClaims(text, deliveryEstimateContext, language) 
   return normalizeBlankLines(value);
 }
 
-function ensureOrderStatusTimeframes({ text, language, latestMessage, shopifyContext }) {
-  if (!isOrderStatusQuestion(latestMessage)) return text;
-  if (!shopifyContext?.selected_order) return text;
-  if (needsShippingPolicy(text)) return text;
-
-  return insertBeforeSignature(
-    text,
-    orderStatusTimeframeParagraph(language, {
-      includeProcessing: !isShippedOrTrackedOrder(shopifyContext.selected_order)
-    })
-  );
-}
-
-function isOrderStatusQuestion(text = '') {
-  return /\b(where\s+is\s+my\s+order|where\s+my\s+order\s+is|order\s+update|update\s+on\s+(?:my\s+)?order|status\s+of\s+(?:my\s+)?order|order\s+status|when\s+will\s+(?:my\s+)?order|when\s+will\s+it\s+arrive|how\s+long\s+(?:will|does)|cu[aá]ndo\s+llega|d[oó]nde\s+est[aá]\s+mi\s+pedido|estado\s+de\s+mi\s+pedido|actualizaci[oó]n\s+de\s+mi\s+pedido|quanto\s+tarda|commande|bestellung|ordine)\b/i.test(text);
-}
-
-function orderStatusTimeframeParagraph(language, { includeProcessing = true } = {}) {
-  if (!includeProcessing) return deliveryOnlyTimeframeParagraph(language);
-
-  return copyForLanguage(language, {
-    English: 'Our processing time is 1-3 days, and delivery normally takes 7-15 days from purchase.',
-    Spanish: 'Nuestro tiempo de preparación es de 1-3 días, y la entrega normalmente tarda 7-15 días desde la compra.',
-    Catalan: 'El nostre temps de preparació és d 1-3 dies, i l entrega normalment triga 7-15 dies des de la compra.',
-    French: 'Notre délai de préparation est de 1 à 3 jours, et la livraison prend normalement 7 à 15 jours à partir de l achat.',
-    German: 'Unsere Bearbeitungszeit beträgt 1-3 Tage, und die Lieferung dauert normalerweise 7-15 Tage ab Kaufdatum.',
-    Italian: 'Il nostro tempo di preparazione è di 1-3 giorni, e la consegna richiede normalmente 7-15 giorni dall acquisto.',
-    Portuguese: 'O nosso tempo de preparação é de 1-3 dias, e a entrega normalmente demora 7-15 dias a partir da compra.',
-    Dutch: 'Onze verwerkingstijd is 1-3 dagen, en levering duurt normaal 7-15 dagen vanaf aankoop.'
-  });
-}
-
-function deliveryOnlyTimeframeParagraph(language) {
-  return copyForLanguage(language, {
-    English: 'Delivery normally takes 7-15 days from purchase.',
-    Spanish: 'La entrega normalmente tarda 7-15 días desde la compra.',
-    Catalan: 'L entrega normalment triga 7-15 dies des de la compra.',
-    French: 'La livraison prend normalement 7 à 15 jours à partir de l achat.',
-    German: 'Die Lieferung dauert normalerweise 7-15 Tage ab Kaufdatum.',
-    Italian: 'La consegna richiede normalmente 7-15 giorni dall acquisto.',
-    Portuguese: 'A entrega normalmente demora 7-15 dias a partir da compra.',
-    Dutch: 'Levering duurt normaal 7-15 dagen vanaf aankoop.'
-  });
-}
-
-function removeProcessingTimeForShippedOrders(text, language, shopifyContext = {}) {
-  if (!isShippedOrTrackedOrder(shopifyContext?.selected_order)) return text;
-
-  const deliveryOnly = deliveryOnlyTimeframeParagraph(language);
-  let value = String(text || '');
-  value = value.replace(
-    /\b(?:Our\s+)?processing time is (?:usually\s+)?1-3 days,?\s+and\s+delivery normally takes 7-15 days from purchase\.?/gi,
-    deliveryOnly
-  );
-  value = value.replace(
-    /\bProcessing time is usually 1-3 days,?\s+and\s+delivery normally takes 7-15 days from purchase\.?/gi,
-    deliveryOnly
-  );
-  value = value.replace(
-    /\bOur processing time is 1-3 days\.\s+Delivery normally takes 7-15 days from purchase\.?/gi,
-    deliveryOnly
-  );
-  value = value.replace(
-    /\bOur processing time is 1-3 days\.?/gi,
-    ''
-  );
-  return normalizeBlankLines(value);
-}
-
-function dedupeDeliveryTimeframeParagraphs(text) {
-  const paragraphs = splitParagraphs(text);
-  let hasTimeframe = false;
-
-  const kept = paragraphs.filter(paragraph => {
-    if (!isDeliveryTimeframeParagraph(paragraph)) return true;
-    if (!hasTimeframe) {
-      hasTimeframe = true;
-      return true;
-    }
-    return !isStandaloneDeliveryTimeframeParagraph(paragraph);
-  });
-
-  return normalizeBlankLines(kept.join('\n\n'));
-}
-
-function isDeliveryTimeframeParagraph(paragraph = '') {
-  return /\b7\s*(?:[-–]|à|a|to)\s*15\s+(?:days?|jours?|d[ií]as?|dies|giorni|tage|dagen)\b/i.test(paragraph);
-}
-
-function isStandaloneDeliveryTimeframeParagraph(paragraph = '') {
-  const value = String(paragraph || '').trim();
-  if (value.length > 180) return false;
-  if (/\n\s*https?:\/\//i.test(value)) return false;
-  return /\b(delivery|livraison|entrega|enviament|consegna|lieferung|levering)\b/i.test(value);
-}
-
-function isShippedOrTrackedOrder(order = {}) {
-  if (!order) return false;
-  const fulfillmentStatus = String(order.fulfillment_status || order.display_fulfillment_status || '').toLowerCase();
-  if (['fulfilled', 'partial', 'shipped'].includes(fulfillmentStatus)) return true;
-
-  const fulfillments = Array.isArray(order.fulfillments) ? order.fulfillments : [];
-  return fulfillments.some(fulfillment => {
-    const displayStatus = String(fulfillment?.display_status || '').toLowerCase();
-    if (['fulfilled', 'in_transit', 'delivered', 'confirmed'].includes(displayStatus)) return true;
-    const numbers = Array.isArray(fulfillment?.tracking_numbers) ? fulfillment.tracking_numbers : [];
-    const tracking = Array.isArray(fulfillment?.tracking) ? fulfillment.tracking : [];
-    return numbers.some(Boolean) || tracking.some(item => item?.number);
-  });
-}
-
-function removeExactTimingClaims(text, guidance, language) {
+function removeExactTimingClaims(text) {
   let value = text.replace(
     /\b(?:estimated\s+remaining|remaining\s+time|time\s+remaining|remaining)\s*[:\s-]*(?:about|around|approximately|approx\.?|~)?\d+(?:\.\d+)?\s*days?\b[^.\n]*\.?/gi,
     ''
@@ -469,7 +228,7 @@ function removeExactTimingClaims(text, guidance, language) {
 
   value = value.replace(
     /\b(?:Based on recent shipments with|Based on recent deliveries with|Based on recent carrier data for)\s+[^.\n]*\b\d+\.\d+\s+days?\b[^.\n]*\.?/gi,
-    () => timingGuidanceReplacement(guidance, language)
+    ''
   );
 
   value = value.replace(
@@ -483,11 +242,6 @@ function removeExactTimingClaims(text, guidance, language) {
   );
 
   return normalizeBlankLines(value);
-}
-
-function timingGuidanceReplacement(guidance, language) {
-  if (!guidance?.usable || language !== 'English') return '';
-  return guidance.customer_guidance || '';
 }
 
 function hasReliableDeliveryEstimate(deliveryEstimateContext) {
@@ -589,119 +343,8 @@ function trackingLabel(language) {
   });
 }
 
-function applyRequiredPolicyLinks(text, language) {
-  const withPolicyLinks = [
-    ['shipping', needsShippingPolicy],
-    ['refund', needsRefundPolicy],
-    ['sizeGuide', needsSizeGuide],
-    ['terms', needsTermsPolicy],
-    ['privacy', needsPrivacyPolicy],
-    ['faqHelp', needsFaqHelpCenter]
-  ].reduce((value, [type, predicate]) => {
-    const withoutDuplicates = removePolicyLinkBlocks(value, POLICY_LINKS[type]);
-    if (!predicate(withoutDuplicates)) return withoutDuplicates;
-    return insertPolicyAfterMatchingParagraph(withoutDuplicates, language, type, predicate);
-  }, text);
-
-  return removeOrphanPolicyLabels(withPolicyLinks);
-}
-
-function needsShippingPolicy(text) {
-  return /\b(7\s*(?:[–-]|à|a|to)\s*15|1\s*(?:[–-]|à|a|to)\s*3|delivery timeframe|delivery time(?:s)?|shipping time(?:s)?|shipping policy|processing time|usual delivery timeframe|plazo(?:s)? de entrega|tiempos? de env[ií]o|cu[aá]nto tarda|tardan|d[ií]as desde la compra|d[eé]lai de livraison|livraison)\b/i.test(text);
-}
-
-function needsRefundPolicy(text) {
-  return /\b(refund|return|returns|exchange|return shipping|reembolso|devoluci[oó]n|devolver|cambio de talla|gastos de env[ií]o de la devoluci[oó]n|retour|remboursement|r[üu]ckgabe|rimborso|reso)\b/i.test(text);
-}
-
-function needsSizeGuide(text) {
-  return /\b(size guide|sizing|measurements|what size|which size|gu[ií]a de tallas|tabla de tallas|medidas|qu[eé] talla|taille|guide des tailles|gr[oö][sß]entabelle|guida alle taglie)\b/i.test(text);
-}
-
-function needsTermsPolicy(text) {
-  return /\b(terms of service|terms and conditions|checkout terms|purchase conditions|conditions of purchase|t[eé]rminos (?:del servicio|y condiciones)|condiciones de compra|conditions g[eé]n[eé]rales|conditions d'achat|agb|allgemeine gesch[aä]ftsbedingungen|termini e condizioni|termos e condi[cç][oõ]es)\b/i.test(text);
-}
-
-function needsPrivacyPolicy(text) {
-  return /\b(privacy policy|privacy|personal data|data protection|gdpr|privacidad|datos personales|protecci[oó]n de datos|politique de confidentialit[eé]|donn[eé]es personnelles|datenschutz|personenbezogene daten|privacybeleid|gegevensbescherming|informativa privacy|politica de privacidade)\b/i.test(text);
-}
-
-function needsFaqHelpCenter(text) {
-  return /\b(faq|help center|help centre|faq help center|help documentation|preguntas frecuentes|centro de ayuda|centre d'aide|foire aux questions|hilfezentrum|centro assistenza|centro de ajuda|veelgestelde vragen)\b/i.test(text);
-}
-
-function removePolicyLinkBlocks(text, url) {
-  const lines = text.split('\n');
-  const remove = new Set();
-  lines.forEach((line, index) => {
-    if (line.trim() !== url) return;
-    markLinkBlockForRemoval(lines, index, remove, isPolicyLabelLine);
-  });
-  return normalizeBlankLines(lines.filter((_, index) => !remove.has(index)).join('\n'));
-}
-
-function isPolicyLabelLine(line = '') {
-  return /\b(policy|pol[ií]tica|politique|richtlinie|beleid|gu[ií]a|guide|maattabel|tabella|terms|t[eé]rminos|privacy|privacidad|faq|help center|centro de ayuda)\b/i.test(line);
-}
-
-function removeOrphanPolicyLabels(text) {
-  const lines = text.split('\n');
-  const remove = new Set();
-
-  lines.forEach((line, index) => {
-    if (!isStandalonePolicyLabel(line)) return;
-
-    const nextContentIndex = nextNonBlankLineIndex(lines, index + 1);
-    const hasPolicyLink = nextContentIndex !== -1 && isPolicyUrl(lines[nextContentIndex]);
-    if (!hasPolicyLink) markLabelOnlyForRemoval(lines, index, remove);
-  });
-
-  return normalizeBlankLines(lines.filter((_, index) => !remove.has(index)).join('\n'));
-}
-
-function isStandalonePolicyLabel(line = '') {
-  const value = line.trim();
-  if (!value || value.length > 90 || /^https?:\/\//i.test(value)) return false;
-  return STANDALONE_POLICY_LABELS.has(normalizePolicyLabel(value));
-}
-
-function normalizePolicyLabel(value = '') {
-  return String(value || '').trim().replace(/:$/, '').trim().toLowerCase();
-}
-
-function isPolicyUrl(line = '') {
-  return Object.values(POLICY_LINKS).includes(line.trim());
-}
-
-function isKnownPublicUrl(line = '') {
-  const value = line.trim();
-  return isPolicyUrl(value) || /https:\/\/kitsrepublic\.com\/apps\/17TRACK\?nums=/i.test(value);
-}
-
 function ensureTrailingColon(value = '') {
   return value.trim().endsWith(':') ? value.trim() : `${value.trim()}:`;
-}
-
-function insertPolicyAfterMatchingParagraph(text, language, type, predicate) {
-  const paragraphs = splitParagraphs(text);
-  const block = policyLinkBlock(language, type);
-  const insertIndex = paragraphs.findIndex(paragraph => predicate(paragraph));
-
-  if (insertIndex === -1) return insertBeforeSignature(text, block);
-
-  paragraphs.splice(insertIndex + 1, 0, block);
-  return normalizeBlankLines(paragraphs.join('\n\n'));
-}
-
-function splitParagraphs(text) {
-  return normalizeBlankLines(text).split(/\n{2,}/);
-}
-
-function policyLinkBlock(language, type) {
-  return [
-    copyForLanguage(language, POLICY_LABELS[type]),
-    POLICY_LINKS[type]
-  ].join('\n');
 }
 
 function insertBeforeSignature(text, block) {
@@ -735,10 +378,6 @@ function inferLanguageFromDraft(text) {
   if (/[ãõç]|\b(ol[aá]|envio|seguimento)\b/i.test(text)) return 'Portuguese';
   if (/\b(hallo|zending|trackingnummer)\b/i.test(text)) return 'Dutch';
   return 'English';
-}
-
-function isGreetingLine(line = '') {
-  return /^(hi|hello|hey|hola|bonjour|hallo|ciao|ol[aá]|dear|salut|buenas|bom dia|boa tarde|good morning|good afternoon)[\s\wÀ-ÿ.'-]*,?$/i.test(line.trim());
 }
 
 function isSignOffLine(line = '') {

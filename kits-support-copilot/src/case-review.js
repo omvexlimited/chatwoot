@@ -18,18 +18,17 @@ export function buildCaseReview({
     duplicateContext
   });
   const missing = missingInfo({ type, order, attachmentAnalysis, duplicateContext });
-  const decision = decisionForCase(type);
 
   return {
     summary: buildSummary({ type, order, latestMessage }),
     detected_case: type,
     verified_facts: facts,
     missing_info: missing,
-    recommended_decision: decision.recommended_decision,
+    recommended_decision: null,
     proposed_reply: '',
-    after_send_action: decision.after_send_action,
+    after_send_action: 'manual_review',
     confidence: supportCase?.confidence || confidenceFromSignals({ facts, type }),
-    warnings: []
+    warnings: ['Recommendation and post-send action must come from the selected published Playbook.']
   };
 }
 
@@ -98,66 +97,6 @@ function missingInfo({ type, order, attachmentAnalysis, duplicateContext }) {
     missing.push('The exact duplicate conversation has not been confirmed from Chatwoot context.');
   }
   return missing;
-}
-
-function decisionForCase(type) {
-  return {
-    customs_pending: {
-      recommended_decision: 'Explain customs/local handoff status using safe customer wording and include the canonical Kits tracking link.',
-      after_send_action: 'leave_open'
-    },
-    order_update: {
-      recommended_decision: 'Give a concise order/tracking update from verified Shopify/provider data.',
-      after_send_action: 'leave_open'
-    },
-    failed_delivery_attempt: {
-      recommended_decision: 'Tell the customer the carrier attempted delivery and ask them to contact or rebook with the local carrier using the tracking details.',
-      after_send_action: 'leave_open'
-    },
-    delivered_not_found: {
-      recommended_decision: 'Ask the customer to check safe places/neighbours and tell them we are checking delivery proof with logistics if needed.',
-      after_send_action: 'wait_customer'
-    },
-    return_request: {
-      recommended_decision: 'Explain return conditions and next steps. Use the China return address only if the return is applicable and approved for this case.',
-      after_send_action: 'leave_open'
-    },
-    refund_request: {
-      recommended_decision: 'Acknowledge the refund request, verify eligibility, and avoid promising a refund unless already confirmed.',
-      after_send_action: 'leave_open'
-    },
-    size_issue: {
-      recommended_decision: 'Handle as sizing/size exchange. Explain return policy and use the approved coupon only when the case calls for it.',
-      after_send_action: 'leave_open'
-    },
-    wrong_item: {
-      recommended_decision: 'Acknowledge the wrong item report, apologize, use image/order evidence, and escalate or wait for supplier/admin confirmation before promising a remedy.',
-      after_send_action: 'wait_supplier'
-    },
-    product_mismatch: {
-      recommended_decision: 'Compare the customer claim with product/order evidence, acknowledge any mismatch, and offer the approved resolution without overstating facts.',
-      after_send_action: 'leave_open'
-    },
-    invoice_request: {
-      recommended_decision: 'Send a concise invoice response only if the invoice is prepared or attached; otherwise say it is being prepared.',
-      after_send_action: 'leave_open'
-    },
-    duplicate_thread: {
-      recommended_decision: 'Avoid duplicate replies. Use one main conversation and close or leave the duplicate without repeating conflicting information.',
-      after_send_action: 'mark_duplicate'
-    },
-    supplier_issue_open: {
-      recommended_decision: 'Use the open internal issue as pending supplier/admin work and avoid creating duplicate tickets.',
-      after_send_action: 'wait_supplier'
-    },
-    other: {
-      recommended_decision: 'Answer conservatively from verified context and ask for missing details if needed.',
-      after_send_action: 'leave_open'
-    }
-  }[type] || {
-    recommended_decision: 'Answer conservatively from verified context and ask for missing details if needed.',
-    after_send_action: 'leave_open'
-  };
 }
 
 function buildSummary({ type, order, latestMessage }) {

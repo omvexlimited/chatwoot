@@ -78,19 +78,6 @@ https://kitsrepublic.com/policies/shipping-policy
 
 ---
 
-## World Cup
-
-Durante la World Cup:
-
-- Más volumen de pedidos.
-- Más problemas de stock.
-- Más retrasos en suppliers.
-- Más retrasos en aduanas.
-
-Es aceptable mencionarlo.
-
----
-
 # 3. Casos de soporte
 
 # CASO 1

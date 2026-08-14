@@ -87,9 +87,10 @@ When both Shopify auth modes are present, the service uses client credentials by
 
 ## Knowledge Base
 
-The copilot loads current support context from the published Kits Republic Playbooks endpoint when `KITS_INTERNAL_API_TOKEN` is configured. If the admin API is unavailable, it falls back to the local markdown files:
+The copilot loads current support policy exclusively from the published Kits Republic Playbooks endpoint when `KITS_INTERNAL_API_TOKEN` is configured. It selects shared Playbooks plus those matching the detected `case_type` or published tags.
 
-- `knowledge/kits-republic-support-guide.md`: base guardrails and support rules.
-- `knowledge/kits-republic-support-playbook-v2.md`: versioned Kits Republic customer support playbook.
+- `published`: current published Playbooks are available and complete.
+- `stale_published`: the Admin API is unavailable and the process uses its last successfully loaded published version.
+- `facts_only`: no published version is available; drafts may use verified case facts but cannot state commercial policy.
 
-Knowledge text is passed to OpenAI as internal context only. It is not exposed by the UI and should not be quoted directly in customer drafts.
+The files under `knowledge/` are historical migration references only. They are never loaded as runtime fallback. Knowledge text is passed to OpenAI as internal context only and must not be quoted directly in customer drafts.

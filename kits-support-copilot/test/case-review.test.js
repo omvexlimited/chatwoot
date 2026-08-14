@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildCaseReview, withCaseReviewDraft } from '../src/case-review.js';
 
-test('builds case review with verified facts and after-send action', () => {
+test('builds a factual case review without embedding a commercial decision', () => {
   const review = buildCaseReview({
     supportCase: {
       type: 'failed_delivery_attempt',
@@ -32,8 +32,9 @@ test('builds case review with verified facts and after-send action', () => {
   });
 
   assert.equal(review.detected_case, 'failed_delivery_attempt');
-  assert.equal(review.after_send_action, 'leave_open');
-  assert.match(review.recommended_decision, /carrier attempted delivery/i);
+  assert.equal(review.after_send_action, 'manual_review');
+  assert.equal(review.recommended_decision, null);
+  assert.match(review.warnings.join('\n'), /selected published Playbook/);
   assert.ok(review.verified_facts.some(fact => fact.includes('GV548675650GB')));
 
   const withDraft = withCaseReviewDraft(review, 'Hi, please contact Royal Mail.');

@@ -147,6 +147,9 @@ const DUPLICATE_PATTERNS = [
 
 export const SUPPORT_CASE_TYPES = [
   'duplicate_thread',
+  'multiple_orders',
+  'no_order_found',
+  'order_update',
   'invoice_request',
   'wrong_item',
   'product_mismatch',
@@ -209,11 +212,25 @@ export function detectSupportCase({
       reasons: ['open_internal_issue']
     };
   }
-  if (!order) return null;
+  const asksForOrderUpdate = CUSTOMER_DELAY_PATTERNS.some(pattern => pattern.test(text));
+  if (!order) {
+    if (asksForOrderUpdate && shopifyContext?.orders?.length > 1) {
+      return { type: 'multiple_orders', confidence: 'high', reasons: ['multiple_order_candidates'] };
+    }
+    if (asksForOrderUpdate) {
+      return { type: 'no_order_found', confidence: 'medium', reasons: ['customer_asks_for_order', 'no_selected_order'] };
+    }
+    return null;
+  }
 
   const fulfillments = Array.isArray(order.fulfillments) ? order.fulfillments : [];
   const fulfillment = fulfillments.find(item => hasTracking(item)) || fulfillments[0];
-  if (!fulfillment || !hasTracking(fulfillment)) return null;
+  if (!fulfillment || !hasTracking(fulfillment)) {
+    if (asksForOrderUpdate) {
+      return { type: 'order_update', confidence: 'high', reasons: ['customer_asks_for_order', 'selected_order_without_tracking'] };
+    }
+    return null;
+  }
   if (isDelivered(fulfillment)) {
     if (DELIVERED_NOT_FOUND_PATTERNS.some(pattern => pattern.test(text))) {
       return {

@@ -282,8 +282,9 @@ export function buildPreparedDraftPayload(row = {}) {
 
 export function buildAgentBriefing({ context = {}, result = {}, fallbackMessage = '' } = {}) {
   const detectedCase = inferDetectedCase(context);
-  const actionChecklist = actionChecklistForCase({ detectedCase, context });
   const caseReview = context.caseReview || {};
+  const selectedPlaybooks = normalizeSelectedPlaybooks(context.selectedPlaybooks);
+  const actionChecklist = neutralActionChecklist(context);
   const warnings = [
     ...normalizeArray(result.warnings),
     ...normalizeArray(context.warnings)
@@ -292,15 +293,17 @@ export function buildAgentBriefing({ context = {}, result = {}, fallbackMessage 
   return {
     summary: clean(result.reasoning_summary) || clean(fallbackMessage) || 'Borrador preparado para revisión humana.',
     detected_case: detectedCase,
-    playbook_used: playbookForCase(detectedCase),
-    decision_path: decisionPathForCase({ detectedCase, caseReview }),
+    playbook_used: selectedPlaybooks.map(playbook => playbook.title).filter(Boolean).join(' + ') || 'Published Playbook selection required',
+    decision_path: selectedPlaybooks.length
+      ? [`Selected by published case_types metadata: ${selectedPlaybooks.map(playbook => playbook.slug).join(', ')}`]
+      : ['No published Playbook was selected; do not make a commercial recommendation.'],
     verified_facts: normalizeArray(caseReview.verified_facts),
     missing_information: normalizeArray(caseReview.missing_info),
-    recommended_decision: clean(caseReview.recommended_decision) || 'Revisar el caso con el Playbook aplicable antes de enviar.',
+    recommended_decision: 'Apply the selected published Playbook to the verified case facts before sending.',
     action_required: actionChecklist.some(item => !/^(No manual action|No hace falta acción manual)/i.test(item)),
     before_sending_checklist: actionChecklist,
-    customer_reply_summary: customerReplySummary({ detectedCase, context }),
-    post_send_action: postSendAction(caseReview.after_send_action),
+    customer_reply_summary: ['Reply to the latest customer message using verified facts and the selected published Playbook.'],
+    post_send_action: 'manual_review',
     risks_or_warnings: [...new Set(warnings)].slice(0, 8)
   };
 }
@@ -645,172 +648,29 @@ function inferDetectedCase(context = {}) {
   return 'general_support';
 }
 
-function actionChecklistForCase({ detectedCase, context }) {
-  const order = context.shopifyContext?.selected_order;
-  const orderRef = order?.name || 'the selected order';
-  const status = String(order?.fulfillment_status || '').toUpperCase();
-  const sent = status === 'FULFILLED' || order?.fulfillments?.some(hasTracking);
-  const sizeChange = extractSizeChange(`${context.latestMessage || ''}\n${context.conversationText || ''}`);
-  const afterSendAction = context.caseReview?.after_send_action;
-
-  if (afterSendAction === 'wait_supplier') {
-    return [
-      'Revisa el ticket/incidencia interna y espera confirmación del supplier/provider antes de prometer una solución definitiva.'
-    ];
-  }
-  if (afterSendAction === 'mark_duplicate') {
-    return [
-      'Comprueba el hilo principal antes de enviar. Evita responder dos veces con información distinta y marca/cierra el duplicado si corresponde.'
-    ];
-  }
-  if (afterSendAction === 'wait_customer') {
-    return [
-      'Deja el caso abierto después de responder porque necesitamos confirmación o información adicional del cliente.'
-    ];
-  }
-
-  if (!order && ['size_change_request', 'address_change_request', 'refund_or_cancel_request'].includes(detectedCase)) {
-    return ['Busca o selecciona el pedido antes de confirmar cualquier cambio al cliente.'];
-  }
-
-  if (detectedCase === 'size_change_request') {
-    if (sent) {
-      return [
-        `Comprueba si ${orderRef} ya fue enviado al supplier/provider.`,
-        `Pregunta al supplier/provider si el cambio de talla${sizeChange ? ` (${sizeChange})` : ''} todavía es posible antes de confirmarlo.`,
-        'Solo confirma el cambio si la acción interna ya está hecha o confirmada.'
-      ];
-    }
-    return [
-      `Actualiza ${orderRef}${sizeChange ? ` ${sizeChange}` : ' con el cambio de talla solicitado'}.`,
-      'Comprueba que las líneas del pedido quedaron guardadas en Shopify/admin antes de responder al cliente.'
-    ];
-  }
-
-  if (detectedCase === 'address_change_request') {
-    if (sent) {
-      return [
-        `Comprueba si ${orderRef} ya fue enviado al supplier/provider.`,
-        'Si no fue enviado, actualiza la dirección de envío en Shopify/admin.',
-        'Si ya fue enviado, pregunta al supplier/provider si todavía puede cambiarse antes de confirmarlo.'
-      ];
-    }
-    return [
-      `Actualiza la dirección de envío de ${orderRef} en Shopify/admin.`,
-      'Verifica calle, número, código postal, ciudad y país antes de enviar la confirmación.'
-    ];
-  }
-
-  if (detectedCase === 'refund_or_cancel_request') {
-    return [
-      `Comprueba el estado de ${orderRef} antes de prometer cancelación, reembolso o devolución.`,
-      'Aplica la política de devolución/reembolso o completa la acción interna antes de confirmarlo.'
-    ];
-  }
-
-  if (detectedCase === 'confirmation_email_or_missing_order') {
-    return [
-      'Busca el pedido por email, teléfono, nombre y dirección si no se seleccionó automáticamente.',
-      'Si faltaba el email en Shopify, añádelo antes de decir al cliente que recibirá futuras actualizaciones ahí.'
-    ];
-  }
-
-  return ['No hace falta acción manual. Revisa el borrador y envíalo si está correcto.'];
-}
-
-function customerReplySummary({ detectedCase, context }) {
-  if (detectedCase === 'size_change_request') {
-    return [
-      'Agradecer el email al cliente.',
-      'Explicar si el cambio de talla puede confirmarse ahora o si primero necesita confirmación del supplier/provider.',
-      'No prometer el cambio salvo que la acción interna ya esté hecha o confirmada.'
-    ];
-  }
-  if (detectedCase === 'address_change_request') {
-    return [
-      'Agradecer el email al cliente.',
-      'Confirmar el cambio de dirección solo si ya se completó internamente.',
-      'Pedir campos de dirección faltantes si hace falta.'
-    ];
-  }
-  if (detectedCase === 'customs_pending') {
-    return [
-      'Explicar el estado actual de aduanas/transportista local en lenguaje claro.',
-      'Incluir un único enlace de tracking de Kits Republic cerca del final.'
-    ];
-  }
-  if (detectedCase === 'tracking_update') {
-    return [
-      'Explicar el estado actual del envío.',
-      'Incluir un único enlace de tracking de Kits Republic cerca del final.'
-    ];
-  }
+function neutralActionChecklist(context = {}) {
+  const checks = ['Review the generated draft against the selected published Playbook before sending.'];
   if (!context.shopifyContext?.selected_order) {
-    return ['Pedir los datos que faltan para localizar el pedido sin inventar estado ni tracking.'];
+    checks.push('Select the correct order before confirming any order-specific action or status.');
   }
-  return ['Responder al último mensaje del cliente usando el contexto del pedido seleccionado.'];
+  if (normalizeArray(context.caseReview?.missing_info).length) {
+    checks.push('Verify the missing case facts required by the selected Playbook.');
+  }
+  return checks;
 }
 
-function playbookForCase(detectedCase = '') {
-  return {
-    payment_dispute: 'Payment Dispute / Chargeback Risk',
-    chargeback_risk: 'Payment Dispute / Chargeback Risk',
-    legal_threat: 'Payment Dispute / Chargeback Risk',
-    return_request: 'Returns And Refunds General',
-    refund_request: 'Returns And Refunds General',
-    refund_or_cancel_request: 'Returns And Refunds General',
-    delivered_not_found: 'Delivered But Not Received',
-    customs_pending: 'Customs / Local Handoff',
-    failed_delivery_attempt: 'Customs / Local Handoff',
-    tracking_not_recognized: 'Tracking Not Recognized',
-    tracking_update: 'Tracking / Shipping Updates',
-    product_mismatch: 'Product Mismatch / Different From Advertised',
-    wrong_item: 'Wrong Item',
-    supplier_issue_open: 'Supplier Issue Open',
-    invoice_request: 'Invoice Requests',
-    size_issue: 'Size Fit Complaints / Size Returns',
-    size_change_request: 'Size Change Before Shipment / Size Returns',
-    address_change_request: 'Address Change',
-    duplicate_thread: 'Duplicate Thread'
-  }[detectedCase] || 'No hay Playbook específico confirmado';
-}
-
-function decisionPathForCase({ detectedCase = '', caseReview = {} } = {}) {
-  const path = [];
-  if (caseReview.summary) path.push(`Resumen del caso: ${caseReview.summary}`);
-  if (caseReview.recommended_decision) {
-    path.push(`Criterio SOP para ${detectedCase || 'general_support'}: ${caseReview.recommended_decision}`);
-  }
-  if (caseReview.after_send_action) {
-    path.push(`Acción posterior indicada por el case review: ${postSendAction(caseReview.after_send_action)}`);
-  }
-  return path.length ? path : ['No hay árbol específico confirmado; aplicar documentación del Playbook y contexto verificado.'];
-}
-
-function postSendAction(value = '') {
-  return {
-    resolve: 'resolver',
-    leave_open: 'dejar_abierto',
-    wait_customer: 'esperar_cliente',
-    wait_supplier: 'esperar_proveedor',
-    mark_duplicate: 'marcar_duplicado',
-    manual_review: 'revisar_manual'
-  }[String(value || '').trim()] || 'revisar_manual';
+function normalizeSelectedPlaybooks(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(playbook => ({
+    slug: clean(playbook?.slug),
+    title: clean(playbook?.title)
+  })).filter(playbook => playbook.slug || playbook.title);
 }
 
 function hasTracking(fulfillment = {}) {
   const numbers = Array.isArray(fulfillment.tracking_numbers) ? fulfillment.tracking_numbers : [];
   const tracking = Array.isArray(fulfillment.tracking) ? fulfillment.tracking : [];
   return numbers.some(Boolean) || tracking.some(item => item?.number);
-}
-
-function extractSizeChange(text = '') {
-  const value = String(text || '');
-  const toInstead = value.match(/\b(?:to|a)\s+(XS|S|M|L|XL|XXL|XXXL|2XL|3XL)\b.{0,40}\b(?:instead of|en vez de|instead)\s+(XS|S|M|L|XL|XXL|XXXL|2XL|3XL)\b/i);
-  if (toInstead) return `de ${toInstead[2].toUpperCase()} a ${toInstead[1].toUpperCase()}`;
-  const fromTo = value.match(/\b(?:from|de)\s+(XS|S|M|L|XL|XXL|XXXL|2XL|3XL)\b.{0,40}\b(?:to|a)\s+(XS|S|M|L|XL|XXL|XXXL|2XL|3XL)\b/i);
-  if (fromTo) return `de ${fromTo[1].toUpperCase()} a ${fromTo[2].toUpperCase()}`;
-  return '';
 }
 
 function normalizeArray(value) {
